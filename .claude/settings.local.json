@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(wc:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)"
     ]
   }
 }
