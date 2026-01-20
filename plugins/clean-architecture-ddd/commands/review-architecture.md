@@ -7,18 +7,6 @@ argument-hint: "[경로]"
 
 클린 아키텍처와 DDD 관점에서 코드를 분석하고 리뷰 문서를 작성합니다.
 
-## 선행 작업 (필수)
-
-이 커맨드를 실행하기 전에 **반드시** 다음 파일을 먼저 읽어야 합니다:
-
-```
-plugins/clean-architecture-ddd/skills/clean-architecture-ddd/SKILL.md
-```
-
-위 파일에 클린 아키텍처 체크리스트와 DDD 체크리스트의 상세 원칙이 정의되어 있습니다.
-
-> **참조**: 체크리스트 상세 원칙은 [`clean-architecture-ddd` 스킬의 SKILL.md](../skills/clean-architecture-ddd/SKILL.md) 를 참조하세요.
-
 ## 사용법
 
 ```
@@ -28,6 +16,31 @@ plugins/clean-architecture-ddd/skills/clean-architecture-ddd/SKILL.md
 ## 설명
 
 지정된 경로(또는 현재 디렉토리)의 코드를 클린 아키텍처 및 DDD 원칙에 따라 분석하고, 잘 구현된 점과 개선이 필요한 점을 문서화합니다.
+
+## 아키텍처 검증 기준
+
+### 클린 아키텍처 체크리스트
+
+| 항목 | 검증 질문 |
+|-----|----------|
+| 의존성 방향 | 모든 의존성이 안쪽(Domain)으로만 향하는가? |
+| Domain 독립성 | Domain에 프레임워크/DB/외부 라이브러리 의존성이 없는가? |
+| 레이어 분리 | 각 레이어의 책임이 명확히 구분되어 있는가? |
+| 인터페이스 분리 | Repository 등이 Domain에 인터페이스로 정의되어 있는가? |
+| Use Case 분리 | 각 Use Case가 단일 책임을 가지고 있는가? |
+
+### DDD 체크리스트
+
+| 항목 | 검증 질문 |
+|-----|----------|
+| Rich Domain Model | Entity가 비즈니스 로직을 포함하는가? (빈약한 모델 아닌지) |
+| Value Object | 불변성 보장, 생성자 내 유효성 검증이 있는가? |
+| Aggregate | 트랜잭션 경계가 적절히 정의되어 있는가? |
+| Aggregate Root | 외부에서 내부 객체에 직접 접근하지 않는가? |
+| Domain Service | 여러 Entity 걸친 로직이 분리되어 있는가? |
+| Repository | 컬렉션 추상화 관점의 인터페이스인가? |
+| Domain Event | 도메인 간 결합도를 낮추는 이벤트가 활용되는가? |
+| Ubiquitous Language | 도메인 용어가 일관되게 사용되는가? |
 
 ## 실행 단계
 
@@ -40,12 +53,12 @@ plugins/clean-architecture-ddd/skills/clean-architecture-ddd/SKILL.md
 
 ### 2단계: 클린 아키텍처 분석
 
-[`clean-architecture-ddd` 스킬의 SKILL.md](../skills/clean-architecture-ddd/SKILL.md)의 **클린 아키텍처 체크리스트** 기준으로 분석:
+위 **클린 아키텍처 체크리스트** 기준으로 분석:
 - 의존성 방향 / Domain 독립성 / 레이어 분리 / 인터페이스 분리 / Use Case 분리
 
 ### 3단계: DDD 분석
 
-[`clean-architecture-ddd` 스킬의 SKILL.md](../skills/clean-architecture-ddd/SKILL.md)의 **DDD 체크리스트** 기준으로 분석:
+위 **DDD 체크리스트** 기준으로 분석:
 - Rich Domain Model / Value Object / Aggregate / Aggregate Root
 - Domain Service / Repository / Domain Event / Ubiquitous Language
 
