@@ -1,3 +1,12 @@
+---
+name: clean-architecture-ddd
+description: |
+  클린 아키텍처와 DDD 원칙에 따라 코드를 작성합니다.
+  Feature 구현, 도메인 설계, 리팩토링, 코드 리뷰 시 사용합니다.
+  TDD(Red-Green-Refactor) 워크플로우를 적용합니다.
+  Unity 프로젝트의 경우 unity-clean-architecture.md를 함께 참조합니다.
+---
+
 # 클린 아키텍처 & DDD 개발 지침
 
 Feature 구현 시 테스트 주도 개발(TDD)과 도메인 주도 설계(DDD) 원칙을 적용하기 위한 가이드입니다.
@@ -7,6 +16,20 @@ Feature 구현 시 테스트 주도 개발(TDD)과 도메인 주도 설계(DDD) 
 - 새로운 기능(Feature)을 구현할 때
 - 도메인 로직을 설계하거나 리팩토링할 때
 - 코드 리뷰 시 아키텍처 검증이 필요할 때
+
+## Unity 프로젝트 지원
+
+이 스킬이 실행되는 프로젝트가 **Unity 프로젝트**인 경우:
+- 프로젝트 루트에 `Assets/` 폴더가 있거나
+- `.unity`, `.meta`, `ProjectSettings/` 등 Unity 관련 파일/폴더가 존재하면
+
+→ **반드시 [unity-clean-architecture.md](unity-clean-architecture.md)를 함께 참조**하여 Unity 특화 규칙을 적용하세요.
+
+Unity 특화 규칙 요약:
+- Domain/Application 레이어에서 `UnityEngine` 네임스페이스 참조 금지
+- MVP 패턴 (View-Presenter) 사용
+- ScriptableObject 기반 데이터 매핑
+- Feature-Based 폴더 구조
 
 ## 기본 행동 수칙
 
@@ -73,6 +96,45 @@ Feature 구현 시 테스트 주도 개발(TDD)과 도메인 주도 설계(DDD) 
 ### Aggregate
 - 트랜잭션의 일관성을 보장하는 단위
 - Aggregate Root를 통해서만 내부 객체 상태 변경
+
+### Domain Service
+- 여러 Entity에 걸친 비즈니스 로직 담당
+- 상태를 가지지 않음 (Stateless)
+
+### Domain Event
+- 도메인 내 중요한 변화를 나타내는 이벤트
+- 도메인 간 결합도를 낮추는 데 활용
+
+### Repository
+- 도메인 관점의 컬렉션 추상화
+- 인터페이스는 Domain에, 구현체는 Infrastructure에 위치
+
+## 아키텍처 검증 체크리스트
+
+코드 리뷰, 리팩토링, 아키텍처 분석 시 다음 체크리스트를 활용합니다.
+
+### 클린 아키텍처 체크리스트
+
+| 항목 | 검증 질문 |
+|-----|----------|
+| 의존성 방향 | 모든 의존성이 안쪽(Domain)으로만 향하는가? |
+| Domain 독립성 | Domain에 프레임워크/DB/외부 라이브러리 의존성이 없는가? |
+| 레이어 분리 | 각 레이어의 책임이 명확히 구분되어 있는가? |
+| 인터페이스 분리 | Repository 등이 Domain에 인터페이스로 정의되어 있는가? |
+| Use Case 분리 | 각 Use Case가 단일 책임을 가지고 있는가? |
+
+### DDD 체크리스트
+
+| 항목 | 검증 질문 |
+|-----|----------|
+| Rich Domain Model | Entity가 비즈니스 로직을 포함하는가? (빈약한 모델 아닌지) |
+| Value Object | 불변성 보장, 생성자 내 유효성 검증이 있는가? |
+| Aggregate | 트랜잭션 경계가 적절히 정의되어 있는가? |
+| Aggregate Root | 외부에서 내부 객체에 직접 접근하지 않는가? |
+| Domain Service | 여러 Entity 걸친 로직이 분리되어 있는가? |
+| Repository | 컬렉션 추상화 관점의 인터페이스인가? |
+| Domain Event | 도메인 간 결합도를 낮추는 이벤트가 활용되는가? |
+| Ubiquitous Language | 도메인 용어가 일관되게 사용되는가? |
 
 ## 작업 프로세스
 

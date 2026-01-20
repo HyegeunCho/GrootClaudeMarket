@@ -1,6 +1,13 @@
+---
+description: 특정 Feature를 클린 아키텍처와 DDD 원칙에 따라 리팩토링합니다.
+argument-hint: "[경로]"
+---
+
 # /refactor-feature 커맨드
 
 특정 Feature를 클린 아키텍처와 DDD 원칙에 따라 리팩토링합니다.
+
+> **참조**: CA/DDD 원칙 상세는 [`clean-architecture-ddd` 스킬의 SKILL.md](../skills/clean-architecture-ddd/SKILL.md) 를 참조하세요.
 
 ## 사용법
 
@@ -20,12 +27,8 @@
 - 현재 레이어 구조 파악
 
 ### 2단계: 문제점 식별
-다음 항목들을 체크합니다:
-- [ ] Domain 레이어에 외부 의존성(프레임워크, DB 등)이 있는가?
-- [ ] 비즈니스 로직이 Presentation 또는 Infrastructure에 있는가?
-- [ ] Entity가 빈약한 도메인 모델(Anemic Domain Model)인가?
-- [ ] Value Object의 유효성 검증이 생성자 외부에 있는가?
-- [ ] Repository 인터페이스가 Domain에 정의되어 있는가?
+
+[`clean-architecture-ddd` 스킬의 SKILL.md](../skills/clean-architecture-ddd/SKILL.md)의 **아키텍처 검증 체크리스트** 기준으로 문제점 파악
 
 ### 3단계: 리팩토링 계획 제안
 발견된 문제점을 기반으로 리팩토링 계획을 제안합니다:

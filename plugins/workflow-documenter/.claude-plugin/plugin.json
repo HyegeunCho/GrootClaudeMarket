@@ -3,5 +3,8 @@
   "version": "1.0.0",
   "description": "작업 워크플로우를 마크다운으로 문서화하는 플러그인",
   "skills": ["./skills/"],
-  "agents": ["./agents/"]
+  "agents": ["./agents/"],
+  "author": {
+    "name": "Groot"
+  }
 }

@@ -1,6 +1,12 @@
+---
+description: 프로젝트 전체를 클린 아키텍처와 DDD 원칙에 따라 리팩토링합니다.
+---
+
 # /refactor-project 커맨드
 
 프로젝트 전체를 클린 아키텍처와 DDD 원칙에 따라 리팩토링합니다.
+
+> **참조**: CA/DDD 원칙 상세는 [`clean-architecture-ddd` 스킬의 SKILL.md](../skills/clean-architecture-ddd/SKILL.md) 를 참조하세요.
 
 ## 사용법
 
