@@ -1,0 +1,48 @@
+{
+  "name": "groot-claude-market",
+  "owner": {
+    "name": "Groot"
+  },
+  "metadata": {
+    "description": "개인용 Claude Code 플러그인 마켓플레이스",
+    "version": "1.0.0",
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "example-skill",
+      "source": "./plugins/example-skill",
+      "description": "예시 스킬 플러그인",
+      "category": "skill",
+      "keywords": ["example", "skill", "demo"]
+    },
+    {
+      "name": "example-agent",
+      "source": "./plugins/example-agent",
+      "description": "예시 서브 에이전트 플러그인",
+      "category": "agent",
+      "keywords": ["example", "agent", "demo"]
+    },
+    {
+      "name": "example-commands",
+      "source": "./plugins/example-commands",
+      "description": "예시 커스텀 커맨드 플러그인",
+      "category": "commands",
+      "keywords": ["example", "commands", "demo"]
+    },
+    {
+      "name": "clean-architecture-ddd",
+      "source": "./plugins/clean-architecture-ddd",
+      "description": "클린 아키텍처와 도메인 주도 설계(DDD) 기반 Feature 구현 지침",
+      "category": "skill",
+      "keywords": ["clean-architecture", "ddd", "tdd", "unity", "architecture"]
+    },
+    {
+      "name": "workflow-documenter",
+      "source": "./plugins/workflow-documenter",
+      "description": "작업 워크플로우를 마크다운으로 문서화하는 플러그인",
+      "category": "agent",
+      "keywords": ["workflow", "documentation", "work-log", "record"]
+    }
+  ]
+}

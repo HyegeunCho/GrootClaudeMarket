@@ -1,0 +1,6 @@
+{
+  "name": "example-commands",
+  "version": "1.0.0",
+  "description": "예시 커스텀 커맨드 플러그인 - 커맨드 작성 방법을 보여줍니다",
+  "commands": ["./commands/"]
+}

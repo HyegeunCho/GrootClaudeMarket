@@ -1,0 +1,6 @@
+{
+  "name": "example-agent",
+  "version": "1.0.0",
+  "description": "예시 서브 에이전트 플러그인 - 에이전트 작성 방법을 보여줍니다",
+  "agents": ["./agents/"]
+}

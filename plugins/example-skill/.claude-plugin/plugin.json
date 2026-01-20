@@ -1,0 +1,6 @@
+{
+  "name": "example-skill",
+  "version": "1.0.0",
+  "description": "예시 스킬 플러그인 - 스킬 작성 방법을 보여줍니다",
+  "skills": ["./skills/"]
+}

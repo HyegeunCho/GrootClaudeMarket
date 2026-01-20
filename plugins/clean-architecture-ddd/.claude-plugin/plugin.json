@@ -1,0 +1,7 @@
+{
+  "name": "clean-architecture-ddd",
+  "version": "1.0.0",
+  "description": "클린 아키텍처와 도메인 주도 설계(DDD) 기반 Feature 구현 지침",
+  "skills": ["./skills/"],
+  "commands": ["./commands/"]
+}
