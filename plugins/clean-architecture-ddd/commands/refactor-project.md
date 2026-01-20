@@ -6,6 +6,16 @@ description: 프로젝트 전체를 클린 아키텍처와 DDD 원칙에 따라 
 
 프로젝트 전체를 클린 아키텍처와 DDD 원칙에 따라 리팩토링합니다.
 
+## 선행 작업 (필수)
+
+이 커맨드를 실행하기 전에 **반드시** 다음 파일을 먼저 읽어야 합니다:
+
+```
+plugins/clean-architecture-ddd/skills/clean-architecture-ddd/SKILL.md
+```
+
+위 파일에 클린 아키텍처 체크리스트와 DDD 체크리스트의 상세 원칙이 정의되어 있습니다.
+
 > **참조**: CA/DDD 원칙 상세는 [`clean-architecture-ddd` 스킬의 SKILL.md](../skills/clean-architecture-ddd/SKILL.md) 를 참조하세요.
 
 ## 사용법
