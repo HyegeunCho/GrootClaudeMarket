@@ -31,6 +31,21 @@ Unity 특화 규칙 요약:
 - ScriptableObject 기반 데이터 매핑
 - Feature-Based 폴더 구조
 
+## Flutter 프로젝트 지원
+
+이 스킬이 실행되는 프로젝트가 **Flutter 프로젝트**인 경우:
+- 프로젝트 루트에 `pubspec.yaml` 파일이 있거나
+- `lib/`, `android/`, `ios/` 등 Flutter 관련 폴더가 존재하면
+
+→ **반드시 [flutter-clean-architecture.md](flutter-clean-architecture.md)를 함께 참조**하여 Flutter 특화 규칙을 적용하세요.
+
+Flutter 특화 규칙 요약:
+- Domain Layer에서 Flutter/외부 패키지 import 금지 (순수 Dart)
+- Riverpod 기반 상태 관리 및 DI
+- Either<Failure, Success> 기반 에러 처리
+- Model(DTO) + Mapper 패턴으로 Entity 분리
+- Feature-Based 폴더 구조
+
 ## 기본 행동 수칙
 
 - **역할**: Senior Backend Developer이자 Software Architect로서 유지보수 가능하고 테스트 가능한 코드 작성
@@ -138,6 +153,39 @@ Unity 특화 규칙 요약:
 
 ## 작업 프로세스
 
+### 레이어별 개발 순서
+
+기능 구현 시 다음 순서를 따릅니다:
+
+```
+1. Domain Layer (순수 비즈니스 로직)
+   - Entity, Value Object 정의
+   - Repository Interface 정의
+   - UseCase 작성
+   ↓
+2. Data Layer (외부 의존성 처리)
+   - Model (DTO) 작성
+   - Mapper 작성
+   - DataSource 작성
+   - Repository Implementation 작성
+   ↓
+3. DI 설정 (의존성 주입)
+   - DataSource Provider/Module 등록
+   - Repository Provider/Module 등록
+   ↓
+4. Presentation Layer (UI)
+   - Provider/Controller/Presenter 작성
+   - Screen/View 작성
+   - Widget/Component 작성
+   ↓
+5. 테스트 작성
+   - UseCase 단위 테스트
+   - Repository 단위 테스트
+   - Widget/UI 테스트
+```
+
+### 상세 프로세스
+
 1. **도메인 파악**: 어떤 Aggregate와 관련? 어떤 Value Object 필요?
 2. **인터페이스 정의**: 구현할 클래스와 메서드 시그니처 먼저 설계
 3. **테스트 시나리오**: 정상 케이스 1개 + 예외 케이스 2개 이상 제안
@@ -148,6 +196,182 @@ Unity 특화 규칙 요약:
 - **Early Return**: 들여쓰기 줄이기 위해 빠른 반환 사용
 - **명시적 예외**: 포괄적인 `Exception` 대신 구체적인 커스텀 예외 정의 (예: `InsufficientFundsException`)
 - **불변성 선호**: 가능한 모든 변수는 `final`, `readonly`, `const` 등으로 불변성 유지
+
+## Either 타입 에러 처리
+
+예외(Exception)를 throw하는 대신 `Either<Failure, Success>` 타입을 반환하여 에러를 명시적으로 처리합니다.
+
+### 장점
+- 컴파일 타임에 에러 처리 강제
+- 예외 전파 방지로 예측 가능한 흐름
+- 함수형 프로그래밍 패턴 적용 가능
+
+### 기본 패턴
+
+```
+// Repository Interface
+Future<Either<Failure, User>> getUser(String id);
+
+// UseCase에서 처리
+final result = await repository.getUser(id);
+return result.fold(
+  (failure) => Left(failure),  // 에러 전파
+  (user) => Right(user),       // 성공 처리
+);
+
+// Presentation에서 처리
+result.fold(
+  (failure) => showError(failure.message),
+  (data) => updateUI(data),
+);
+```
+
+### Failure 타입 정의
+
+```
+abstract class Failure {
+  final String message;
+  const Failure(this.message);
+}
+
+class ServerFailure extends Failure { ... }
+class ValidationFailure extends Failure { ... }
+class NetworkFailure extends Failure { ... }
+class CacheFailure extends Failure { ... }
+```
+
+## Model(DTO) vs Entity 구분
+
+### Entity
+- **위치**: Domain Layer
+- **목적**: 비즈니스 로직과 도메인 규칙 표현
+- **특징**:
+  - 순수 언어만 사용 (프레임워크 의존성 금지)
+  - 불변성 (Immutable)
+  - JSON 직렬화 로직 포함 금지
+  - 비즈니스 메서드 포함 가능
+
+### Model (DTO)
+- **위치**: Data Layer
+- **목적**: 외부 시스템과 데이터 교환
+- **특징**:
+  - JSON 직렬화/역직렬화 담당
+  - DB 스키마나 API 응답 구조에 맞춤
+  - 비즈니스 로직 포함 금지
+
+### Mapper
+- **위치**: Data Layer
+- **목적**: Entity ↔ Model 양방향 변환
+- **특징**:
+  - static 메서드로 구성
+  - `toEntity()`, `toModel()` 메서드 제공
+  - 리스트 변환 헬퍼 제공
+
+```
+// Mapper 예시
+class UserMapper {
+  static UserEntity toEntity(UserModel model) { ... }
+  static UserModel toModel(UserEntity entity) { ... }
+  static List<UserEntity> toEntityList(List<UserModel> models) { ... }
+}
+```
+
+## UseCase 직접 인스턴스화 패턴
+
+UseCase는 DI 컨테이너에 등록하지 않고, 필요한 곳에서 직접 인스턴스화합니다.
+
+### 올바른 패턴
+
+```
+// DI에는 Repository만 등록
+@riverpod
+UserRepository userRepository(ref) => UserRepositoryImpl(...);
+
+// Presentation에서 UseCase 직접 생성
+Future<void> createUser(UserParams params) async {
+  final repository = ref.read(userRepositoryProvider);
+  final useCase = CreateUserUseCase(repository);  // 직접 인스턴스화
+  final result = await useCase(params);
+  // ...
+}
+```
+
+### 잘못된 패턴
+
+```
+// ❌ UseCase를 Provider로 등록하지 않음
+@riverpod
+CreateUserUseCase createUserUseCase(ref) => ...;
+```
+
+### 이유
+- UseCase는 상태를 가지지 않는 단순 로직 컨테이너
+- DI 그래프 복잡도 감소
+- 테스트 시 Repository만 Mock하면 됨
+
+## 일반적인 실수와 해결책
+
+### ❌ Entity에 JSON 직렬화 로직 추가
+
+```
+// 잘못된 예
+class UserEntity {
+  factory UserEntity.fromJson(Map<String, dynamic> json) => ...
+}
+```
+
+**해결책**: JSON 로직은 Model에만, Mapper로 변환
+
+### ❌ Repository에서 비즈니스 로직 처리
+
+```
+// 잘못된 예
+class UserRepositoryImpl {
+  Future<User> createUser(User user) async {
+    if (user.email.isEmpty) return Left(ValidationFailure(...));  // ❌
+    // ...
+  }
+}
+```
+
+**해결책**: 유효성 검증은 UseCase에서 처리
+
+### ❌ DataSource가 Entity 직접 사용
+
+```
+// 잘못된 예
+class UserRemoteDataSource {
+  Future<UserEntity> getUser(String id) async { ... }  // ❌
+}
+```
+
+**해결책**: DataSource는 Model만 사용, Repository에서 Mapper로 변환
+
+### ❌ Domain Layer에 프레임워크 import
+
+```
+// 잘못된 예
+import 'package:flutter/material.dart';  // ❌
+import 'package:supabase/supabase.dart'; // ❌
+
+class UserEntity {
+  final Color favoriteColor;  // ❌ Flutter 타입
+}
+```
+
+**해결책**: Domain Layer는 순수 언어 타입만 사용
+
+### ❌ UseCase를 DI Provider로 등록
+
+```
+// 잘못된 예
+@riverpod
+CreateUserUseCase createUserUseCase(ref) {
+  return CreateUserUseCase(ref.watch(userRepositoryProvider));
+}
+```
+
+**해결책**: Repository만 DI 등록, UseCase는 직접 인스턴스화
 
 ## 주의사항
 
