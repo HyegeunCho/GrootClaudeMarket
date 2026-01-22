@@ -1,9 +1,9 @@
 ---
 name: clean-architecture-ddd
 description: |
-  클린 아키텍처와 DDD 원칙에 따라 코드를 작성합니다.
-  Feature 구현, 도메인 설계, 리팩토링, 코드 리뷰 시 사용합니다.
-  TDD(Red-Green-Refactor) 워크플로우를 적용합니다.
+  클린 아키텍처와 DDD 원칙에 대한 가이드를 제공합니다.
+  이 스킬이 활성화된 상태에서 코드 작성, 리팩토링, 리뷰 요청 시
+  해당 원칙들을 적용합니다.
   Unity 프로젝트의 경우 unity-clean-architecture.md를 함께 참조합니다.
 ---
 
