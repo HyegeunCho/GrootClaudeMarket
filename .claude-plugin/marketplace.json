@@ -22,6 +22,13 @@
       "description": "작업 워크플로우를 마크다운으로 문서화하는 플러그인",
       "category": "agent",
       "keywords": ["workflow", "documentation", "work-log", "record"]
+    },
+    {
+      "name": "atomic-decomposition",
+      "source": "./plugins/atomic-decomposition",
+      "description": "기획·구현 의도를 Layer(L0~L4)와 Atom(1문서 1결정) 단위로 분해하여 문서화하는 스킬",
+      "category": "skill",
+      "keywords": ["atomic", "decomposition", "layer", "atom", "documentation", "design-doc"]
     }
   ]
 }
