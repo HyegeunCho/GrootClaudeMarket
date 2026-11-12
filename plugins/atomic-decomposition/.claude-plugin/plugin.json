@@ -1,6 +1,6 @@
 {
   "name": "atomic-decomposition",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "기획·구현 의도를 Layer(L0~L4)와 Atom(1문서 1결정) 단위로 분해하여 문서화하는 스킬",
   "skills": ["./skills/"],
   "author": {

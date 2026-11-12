@@ -46,7 +46,7 @@
 
 기획·구현 결정은 `<root>/`에 1문서 1결정(Atom)으로 기록한다. 규약은 `<root>/README.md`.
 - 작업 전: 관련 규칙 검색 `rg -l "<키워드>" <root>/atoms`
-- 결정 추가: `/atomic-decomposition <요청문>`
+- 결정 추가: `/atomic-decomposition:atomic-decomposition <요청문>`
 - 영향 범위: `rg "\[\[<atom_name>\]\]"`
 ```
 
@@ -56,6 +56,6 @@
 1. 생성된 트리 (`find <root> -type f | sort` 결과)
 2. "새로 생성" / "기존 유지" 항목 구분
 3. `L0_vision.md`의 `[MISSING]` 여부, 채우려면 무엇이 필요한지
-4. 1단계에서 찾은 기존 결정 문서 후보. 이관을 원하면 `/atomic-decomposition <문서 경로>`로 하나씩 분해할 수 있다고 안내합니다.
+4. 1단계에서 찾은 기존 결정 문서 후보. 이관을 원하면 `/atomic-decomposition:atomic-decomposition <문서 경로>`로 하나씩 분해할 수 있다고 안내합니다.
 
 커밋은 사용자가 요청할 때만 합니다.

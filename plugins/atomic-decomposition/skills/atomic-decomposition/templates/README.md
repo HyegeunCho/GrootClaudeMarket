@@ -1,7 +1,7 @@
 # 결정사항 저장소 (Layer · Atom)
 
 이 폴더는 기획 의도(Why/What)와 구현 의도(How/Data)를 **Layer(L0~L4)** 와 **Atom(1문서 1결정)** 으로 기록합니다.
-생성·관리 도구: Claude Code `atomic-decomposition` 플러그인 (`/atomic-decomposition <요청문>`).
+생성·관리 도구: Claude Code `atomic-decomposition` 플러그인 (`/atomic-decomposition:atomic-decomposition <요청문>`).
 
 ## 폴더 구조
 
