@@ -8,7 +8,7 @@
 |---------|------|----------|
 | `clean-architecture-ddd` | 클린 아키텍처와 DDD 기반 Feature 구현 지침 | skills, commands |
 | `workflow-documenter` | 작업 워크플로우를 마크다운으로 문서화 | skills, agents |
-| `atomic-decomposition` | 기획·구현 의도를 Layer(L0~L4)와 Atom(1문서 1결정) 단위로 분해하여 문서화 | skills |
+| `atomic-decomposition` | 기획·구현 의도를 Layer(L0~L4)와 Atom(1문서 1결정) 단위로 분해하여 문서화하고 책으로 엮음 | skills, commands |
 
 ### clean-architecture-ddd
 
@@ -39,6 +39,12 @@
 **사용법:**
 - `/atomic-decomposition:atomic-decomposition init [저장소 경로]` - Layer·Atom 문서 저장소 초기화
 - `/atomic-decomposition:atomic-decomposition <요청문 또는 문서 경로>` - 결정사항 분해·문서화
+- `/atomic-decomposition:book [outline | build | <부·장 이름>]` - 저장소와 컨텍스트 문서(기획서·지침·프롬프트)를 책으로 엮기
+
+**책 만들기:**
+- 여러 Atom을 주제별 장으로 묶어 편집하고, 바뀐 결정은 변화 과정을 순서대로 소개합니다. 과거 결정과 현행 결정의 원문은 부록에 그대로 싣습니다.
+- 결과물은 상대 링크로만 이어진 GitBook용 md(`md/`)입니다. GitBook 빌드나 HTML 만들기는 각자 하도록 방법을 안내합니다.
+- Node 20 이상이 필요하고 따로 설치할 것은 없습니다.
 
 ## 사용 방법
 
@@ -77,7 +83,9 @@ GrootClaudeMarket/
 │   │   ├── skills/
 │   │   └── agents/
 │   └── atomic-decomposition/     # Layer·Atom 분해 문서화 플러그인
-│       └── skills/
+│       ├── skills/
+│       ├── commands/
+│       └── book/                 # 책 만들기 도구 (Node 스크립트, 지침, 테스트)
 ├── CLAUDE.md
 └── README.md
 ```
