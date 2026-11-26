@@ -45,10 +45,32 @@ test('발췌에 현행과 이력이 오래된 순으로 있다', () => {
   assert.equal(b.includes('대출 기획서 v2'), false);
 });
 
-test('배경 장의 발췌에는 컨텍스트 문서의 모든 버전이 있다', () => {
-  const b = renderBundle(entryOf(ctx, 'background/plan'), ctx);
+test('장의 context에 넣은 문서는 어느 부에서든 모든 버전이 발췌에 있다', () => {
+  const b = renderBundle(entryOf(ctx, 'loan/plan'), ctx);
   assert.match(b, /대출 기획서 v1/);
   assert.match(b, /대출 기획서 v2/);
+});
+
+test('발췌 첫 줄은 장의 자리, 장면, 앞뒤 장을 알린다', () => {
+  const head = renderBundle(entry, ctx).split('\n')[0];
+  assert.equal(head, '장 원문 발췌: 1부 · 책을 빌리는 사람 / 2장. 대출 한도 (loan/limits) · 장면: 책을 빌리러 왔습니다. 몇 권까지 빌릴 수 있을까요? · 앞 장: 1장. 기획서가 정한 것 [[loan/plan]] · 다음 장: 3장. 알림 수단 [[notice/channels]]');
+});
+
+test('장면이나 순서만 바꾸면 다시 쓰지 않는다', () => {
+  const b = makeBook();
+  edit(b.project, 'docs/atomic-book/book.json', (t) => t.replace('몇 권까지 빌릴 수 있을까요?', '얼마나 빌릴까요?').replace('"localNav": true', '"numbering": false, "localNav": true'));
+  const o = open(b.dir);
+  assert.equal(chapterStatus(o.entry, o.ctx), 'done');
+});
+
+test('여는 글의 발췌에는 차례와 장면, L0 문서, 현행 결정의 요약이 있다', () => {
+  const b = renderBundle(entryOf(ctx, 'opening'), ctx);
+  assert.match(b, /^여는 글 원문 발췌: 예제 결정 책 \(opening\)/);
+  assert.match(b, /- 1부 · 책을 빌리는 사람\n  - 1장\. 기획서가 정한 것 \[\[loan\/plan\]\] — 장면: 기획서를 펼칩니다/);
+  assert.match(b, /=== Layer 문서: L0_vision[\s\S]*누구나 책을 빌릴 수 있게 한다/);
+  assert.match(b, /- notice_time_rule_v1 \(rule · draft\) 알림 시각은 정한 때뿐이다: /);
+  assert.doesNotMatch(b, /L1_loan_system|loan_limit_decision_v1/);
+  assert.equal(chapterStatus(entryOf(ctx, 'opening'), ctx), 'done');
 });
 
 test('절의 원문은 속한 문서와 이력 전체다', () => {
@@ -84,12 +106,12 @@ test('Rule이 바뀌면 rewrite다', () => {
   edit(b.project, V3, (t) => t.replace('띄운다', '벌린다'));
   const o = open(b.dir);
   assert.equal(chapterStatus(o.entry, o.ctx), 'rewrite');
-  assert.equal(chapterStatus(entryOf(o.ctx, 'background/plan'), o.ctx), 'done');
+  assert.equal(chapterStatus(entryOf(o.ctx, 'loan/plan'), o.ctx), 'done');
 });
 
 test('장에 Atom이 늘면 rewrite다', () => {
   const b = makeBook();
-  edit(b.project, 'docs/atomic-book/book.json', (t) => t.replace('"loan_return_rule_v2"', '"loan_return_rule_v2",\n "notice_feedback_v1"'));
+  edit(b.project, 'docs/atomic-book/book.json', (t) => t.replace(/"loan_return_rule_v2"(\s*\])/, '"loan_return_rule_v2", "notice_feedback_v1"$1'));
   const o = open(b.dir);
   assert.equal(chapterStatus(o.entry, o.ctx), 'rewrite');
 });
@@ -154,7 +176,7 @@ test('bundle은 발췌를 쓰고 상태를 알려 주며 원본은 그대로다'
 
 test('bundle --only는 부나 장의 이름으로 고른다', () => {
   const b = makeBook({ reviewed: false });
-  for (const only of ['notice', '알림', 'notice/channels', '알림 수단']) {
+  for (const only of ['notice', '알림을 받는 사람', 'notice/channels', '알림 수단']) {
     const r = runCli('bundle', '--out', b.dir, '--only', only);
     assert.equal(r.code, 0, r.err);
     assert.match(r.out, /notice\/channels/);
@@ -162,7 +184,11 @@ test('bundle --only는 부나 장의 이름으로 고른다', () => {
   }
   const r = runCli('bundle', '--out', b.dir, '--only', '없는 부');
   assert.equal(r.code, 2);
-  assert.match(r.err, /대출/);
+  assert.match(r.err, /빌리는/);
+  const o = runCli('bundle', '--out', b.dir, '--only', 'opening');
+  assert.equal(o.code, 0, o.err);
+  assert.match(o.out, /^\S+\s+opening  여는 글/);
+  assert.equal(exists(b.project, 'docs/atomic-book/.work/bundles/opening.md'), true);
 });
 
 test('목차에 없는 Atom 이름이 있어도 발췌를 만든다', () => {

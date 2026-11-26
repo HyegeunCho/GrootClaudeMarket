@@ -8,7 +8,9 @@ import { inside, loadContext } from './context.mjs';
 
 export const BOOK_SCHEMA = 'atomic-book/v1';
 export const STATE_SCHEMA = 'atomic-book-state/v1';
-export const BACKGROUND = 'background';
+/** 여는 글. 장처럼 쓰고 대조하지만 표지(README.md)에 실린다. */
+export const OPENING = 'opening';
+export const OPENING_TITLE = '여는 글';
 const ID = /^[a-z0-9][a-z0-9-]*$/;
 
 function readJson(file, schema) {
@@ -37,20 +39,54 @@ export function* chapters(book) {
   }
 }
 
-/** 목차가 저장소를 빠짐없이 한 번씩 담는지 본다. */
+/** 쓰고 대조할 것 전부: 여는 글과 장. */
+export function* entries(book) {
+  yield { part: { id: '', title: '' }, chapter: { id: OPENING, title: OPENING_TITLE }, key: OPENING, opening: true };
+  yield* chapters(book);
+}
+
+/** 책에 보이는 부·장 제목. numbering이 false가 아니면 `1부 · `, `1장. `을 붙인다. 장 번호는 책 전체에서 이어진다. */
+export function titles(book) {
+  const numbered = book.numbering !== false;
+  const part = new Map();
+  const chapter = new Map();
+  let p = 0;
+  let c = 0;
+  for (const x of book.parts ?? []) {
+    p++;
+    part.set(x.id, numbered ? `${p}부 · ${x.title ?? ''}` : x.title ?? '');
+    for (const ch of x.chapters ?? []) {
+      c++;
+      chapter.set(`${x.id}/${ch.id}`, numbered ? `${c}장. ${ch.title ?? ''}` : ch.title ?? '');
+    }
+  }
+  return { part, chapter };
+}
+
+/** 원고의 `[[부/장]]`이나 `[[장]]`(장 id가 책에서 하나뿐일 때)이 가리키는 장. */
+export function chapterRef(book, name) {
+  const list = [...chapters(book)];
+  const exact = list.find((e) => e.key === name);
+  if (exact) return exact;
+  const same = list.filter((e) => e.chapter.id === name);
+  return same.length === 1 ? same[0] : null;
+}
+
+/**
+ * 목차를 검사한다.
+ * - 현행 결정은 어느 장의 atoms에 한 번 이상 있거나 appendixOnly에 있어야 한다. 여러 장에 나와도 된다
+ * - 후속 없는 폐기는 따로 둘 곳이 없어도 부록에 실린다. 장의 dropped에 넣으면 그 장의 근거 목록에도 나온다
+ */
 export function validateOutline(book, store, context) {
-  const lineage = buildLineage(store);
-  const seen = new Map();
+  const placed = new Set();
+  const duplicate = new Set();
   const archived = new Set();
   const unknown = new Set();
   const problems = [];
   const keys = new Set();
   const contextIds = new Set(context.map((c) => c.id));
-  const edited = new Map();
-  const place = (name) => {
-    seen.set(name, (seen.get(name) ?? 0) + 1);
-    if (store.docs.get(name)?.kind !== 'atom') unknown.add(name);
-  };
+  const used = new Map();
+  const isAtom = (n) => store.docs.get(n)?.kind === 'atom';
   if (!book.title) problems.push('책 제목이 없습니다');
   for (const part of book.parts ?? []) if (!part.title) problems.push(`부 제목이 없습니다: ${part.id}`);
   for (const { part, chapter, key } of chapters(book)) {
@@ -58,15 +94,23 @@ export function validateOutline(book, store, context) {
     if (!ID.test(part.id ?? '') || !ID.test(chapter.id ?? '')) problems.push(`id는 영문 소문자·숫자·-만 씁니다: ${key}`);
     if (keys.has(key)) problems.push(`장이 겹칩니다: ${key}`);
     keys.add(key);
+    if (chapter.lead !== undefined && typeof chapter.lead !== 'string') problems.push(`lead는 한 문장 글로 씁니다: ${key}`);
+    const here = new Set();
     for (const n of chapter.atoms ?? []) {
-      place(n);
-      if (store.docs.get(n) && !store.docs.get(n).live) archived.add(n);
+      if (here.has(n)) duplicate.add(n);
+      here.add(n);
+      placed.add(n);
+      if (!isAtom(n)) unknown.add(n);
+      else if (!store.docs.get(n).live) archived.add(n);
     }
-    for (const n of chapter.dropped ?? []) place(n);
+    for (const n of chapter.dropped ?? []) {
+      if (!isAtom(n)) unknown.add(n);
+      else if (store.docs.get(n).live) problems.push(`dropped에는 폐기된 결정만 둡니다: ${n} (${key})`);
+    }
     for (const n of chapter.layers ?? []) if (store.docs.get(n)?.kind !== 'layer') problems.push(`Layer 문서가 없습니다: ${n} (${key})`);
     for (const id of chapter.context ?? []) {
       if (!contextIds.has(id)) problems.push(`컨텍스트 문서가 없습니다: ${id} (${key})`);
-      else if (part.id === BACKGROUND) edited.set(id, (edited.get(id) ?? 0) + 1);
+      else used.set(id, (used.get(id) ?? 0) + 1);
     }
   }
   const names = context.flatMap((c) => c.versions.map((v) => v.name));
@@ -74,13 +118,22 @@ export function validateOutline(book, store, context) {
   for (const n of repeated(names)) problems.push(`컨텍스트 문서의 이름이 겹칩니다. 버전마다 label을 다르게 적으세요: ${n}`);
   for (const id of repeated(context.map((c) => c.id))) problems.push(`컨텍스트 문서의 id가 겹칩니다: ${id}`);
   for (const c of context) {
-    const n = edited.get(c.id) ?? 0;
-    if (c.mode === 'edit' && n !== 1) problems.push(`편집할 컨텍스트 문서 ${c.id}는 ${BACKGROUND} 부의 장 하나에 있어야 합니다 (지금 ${n}곳)`);
+    const n = used.get(c.id) ?? 0;
+    if (c.mode === 'edit' && n === 0) problems.push(`편집할 컨텍스트 문서 ${c.id}가 어느 장의 context에도 없습니다`);
+    if (c.mode !== 'edit' && n > 0) problems.push(`원문만 싣는 컨텍스트 문서 ${c.id}는 장의 context에 넣지 않습니다. 본문에서 가리키려면 [[${c.id}]]로 씁니다`);
   }
-  const must = [...store.atoms.filter((d) => d.live), ...lineage.orphans].map((d) => d.name);
+  const only = book.appendixOnly ?? [];
+  for (const n of only) {
+    if (!isAtom(n)) unknown.add(n);
+    else if (placed.has(n)) duplicate.add(n);
+  }
+  for (const [n, label] of Object.entries(book.labels ?? {})) {
+    if (!store.docs.has(n) && !contextIds.has(n)) problems.push(`labels에 저장소에 없는 이름이 있습니다: ${n}`);
+    else if (typeof label !== 'string' || !label.trim()) problems.push(`labels의 이름이 비었습니다: ${n}`);
+  }
   return {
-    missing: must.filter((n) => !seen.has(n)).sort(),
-    duplicate: [...seen].filter(([, n]) => n > 1).map(([n]) => n).sort(),
+    missing: store.atoms.filter((d) => d.live && !placed.has(d.name) && !only.includes(d.name)).map((d) => d.name).sort(),
+    duplicate: [...duplicate].sort(),
     unknown: [...unknown].sort(),
     archived: [...archived].sort(),
     problems,

@@ -28,7 +28,7 @@
       "source": "./plugins/atomic-decomposition",
       "description": "기획·구현 의도를 Layer(L0~L4)와 Atom(1문서 1결정) 단위로 분해하여 문서화하고, 사람이 읽는 책으로 엮는 스킬과 커맨드",
       "category": "skill",
-      "keywords": ["atomic", "decomposition", "layer", "atom", "documentation", "design-doc", "book", "gitbook"]
+      "keywords": ["atomic", "decomposition", "layer", "atom", "documentation", "design-doc", "book", "gitbook", "html"]
     }
   ]
 }

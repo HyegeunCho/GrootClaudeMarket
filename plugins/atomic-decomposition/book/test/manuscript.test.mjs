@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseManuscript } from '../lib/manuscript.mjs';
-import { LIMITS, PLAN, VISION } from './samplebook.mjs';
+import { LIMITS, PLAN } from './samplebook.mjs';
 
 const m = parseManuscript(LIMITS);
 
@@ -14,7 +14,7 @@ test('제목·도입·절을 읽는다', () => {
 test('절의 원문 표식을 읽는다', () => {
   assert.deepEqual(m.sections[1].atoms, ['loan_limit_decision_v3', 'loan_fee_values_rnd_v1']);
   assert.deepEqual(parseManuscript(PLAN).sections[0].context, ['plan']);
-  assert.deepEqual(parseManuscript(VISION).sections[0].layers, ['L0_vision']);
+  assert.deepEqual(parseManuscript('# 장\n\n## 절\n<!-- layers: L0_vision -->\n글\n').sections[0].layers, ['L0_vision']);
   assert.equal(m.sections[3].open, true);
   assert.equal(m.sections[0].open, false);
 });

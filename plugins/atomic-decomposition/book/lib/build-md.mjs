@@ -1,17 +1,22 @@
 // GitBook용 md를 만든다. 원고는 다듬어 싣고, 원문은 링크 표기만 바꿔 그대로 싣는다.
+// 책의 차례: 여는 글 → 부·장(원고) → 부록(원문을 Layer별로) → 다른 순서로 보기
 import fs from 'node:fs';
 import path from 'node:path';
 import { publishDir } from './fsutil.mjs';
 import { hash, hasException } from './bundle.mjs';
-import { BACKGROUND } from './bookfile.mjs';
+import { OPENING_TITLE } from './bookfile.mjs';
 import { escapeFakeLinks, mdText, relLink, replaceWiki, rewriteOriginal } from './links.mjs';
-import { chapterGraph, toMermaid } from './graph.mjs';
-import { APPENDIX, planSite, statusLabel, versionLabel } from './site.mjs';
+import { layerGroups, levelOf } from './layers.mjs';
+import { planSite, statusLabel, versionLabel } from './site.mjs';
 import { MARK } from './manuscript.mjs';
 
 export const ORIGINAL_BEGIN = '<!-- original:begin -->';
 export const ORIGINAL_END = '<!-- original:end -->';
 const IMAGE = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.avif']);
+const KIND = { plan: '기획서', guide: '지침', prompt: '프롬프트', reference: '참고 자료' };
+const APPENDIX_GROUP = '부록 · 원문 찾아보기';
+const APPENDIX_INDEX = 'appendix/README.md';
+const VIEW_GROUP = '다른 순서로 보기';
 
 export function fenced(lang, text) {
   const longest = Math.max(2, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
@@ -21,60 +26,37 @@ export function fenced(lang, text) {
 
 const tidy = (s) => s.replace(/\n{3,}/g, '\n\n').trim() + '\n';
 const anchorTag = (id) => ` <a href="#${id}" id="${id}"></a>`;
+const stem = (name) => name.replace(/_v\d+$/, '');
+const details = (summary, body) => ['<details>', `<summary>${summary}</summary>`, '', body, '', '</details>'].join('\n');
+const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.name < b.name ? -1 : 1);
 
 function makeRenderer(ctx, site, assets) {
   const link = (from, label, place) => `[${mdText(label)}](${relLink(from, place.file, place.anchor)})`;
   const toOriginal = (from, name, label = '원문') => { const o = site.originalOf(name); return o ? link(from, label, o) : ''; };
   const toPlace = (from, name, label) => { const p = site.placeOf(name); return p ? link(from, label ?? site.titleOf(name), p) : mdText(label ?? site.titleOf(name)); };
 
-  const stateLine = (from, doc) => [
-    doc.type === 'feedback' ? '재발 방지' : '',
-    versionLabel(doc.name) ? `현재 ${versionLabel(doc.name)}` : '',
-    doc.date, statusLabel(doc.status), toOriginal(from, doc.name),
-  ].filter(Boolean).join(' · ');
-
-  const stateLines = (from, docs) => {
-    if (docs.length < 2) return docs.map((d) => stateLine(from, d)).join('');
-    return docs.map((d) => `- ${mdText(d.title)}: ${stateLine(from, d)}`).join('\n');
+  /** 결정의 상태: 재발 방지 · 초안(draft) · v3 · 2026-03-21 · 예외 있음 · 이력 3건 */
+  const stateOf = (d) => {
+    const n = ctx.lineage.thread(d.name).length;
+    return [d.type === 'feedback' ? '재발 방지' : '', statusLabel(d.status), versionLabel(d.name), d.date, hasException(d) ? '예외 있음' : '', d.live && n > 1 ? `이력 ${n}건` : '']
+      .filter(Boolean).join(' · ');
   };
 
-  /** 폐기된 결정을 가리키면 그 사실과 지금의 결정을 함께 알린다. */
-  const toRelated = (from, name) => {
-    const d = ctx.store.docs.get(name);
-    if (d.kind !== 'atom' || d.live) return toPlace(from, name);
-    const now = ctx.lineage.current(name).map((n) => toPlace(from, n));
-    return `${toOriginal(from, name, site.titleOf(name))} (폐기${now.length ? ` → 현재: ${now.join(', ')}` : ''})`;
+  /** 부록 차례의 Layer 묶음 이름: `L1 · 대출 시스템` */
+  const groupTitle = (g) => {
+    if (g.doc) return g.level ? `L${g.level} · ${site.labelOf(g.doc.name)}` : site.labelOf(g.doc.name);
+    return g.level ? `L${g.level} · 소속 Layer 문서가 없는 결정` : 'Layer를 정하지 않은 결정';
   };
 
-  function related(from, docs) {
-    const own = new Set(docs.map((d) => d.name));
-    const groups = { 전제: [], 영향: [], '이 결정을 참조': [], 충돌: [] };
-    const add = (k, n) => { if (!own.has(n) && !groups[k].includes(n)) groups[k].push(n); };
-    for (const d of docs) {
-      const out = ctx.relations.out.get(d.name) ?? [];
-      for (const [rel, group] of [['requires', '전제'], ['derives_from', '전제'], ['affects', '영향']]) {
-        for (const e of out) if (e.rel === rel) add(group, e.to);
-      }
-      for (const { rel, from: other } of ctx.relations.in.get(d.name) ?? []) {
-        const o = ctx.store.docs.get(other);
-        if (rel !== 'part_of' && o.kind === 'atom' && o.live) add('이 결정을 참조', other);
-      }
-      for (const c of ctx.relations.clashes) {
-        if (c.from === d.name) add('충돌', c.to);
-        if (c.to === d.name) add('충돌', c.from);
-      }
-    }
-    const lines = Object.entries(groups).filter(([, n]) => n.length).map(([k, n]) => `- ${k}: ${n.map((x) => toRelated(from, x)).join(', ')}`);
-    return lines.length ? ['**이어진 결정**', '', ...lines].join('\n') : '';
-  }
-
-  const exceptions = (from, docs) => docs.filter(hasException)
-    .map((d) => `예외 있음 → ${toOriginal(from, d.name, docs.length > 1 ? `${d.title} 원문` : '원문')}`).join('\n\n');
-
+  /**
+   * 원고의 [[이름]]. `부/장`은 그 장으로, 문서 이름은 부록 원문으로 잇는다 (근거 링크).
+   * 링크 글은 원고의 별칭 → book.json의 labels → 제목 순서로 고른다.
+   */
   const wiki = (from, text) => replaceWiki(escapeFakeLinks(text), (name, label) => {
-    const p = site.placeOf(name);
-    if (!p) return mdText(label ?? name);
-    return label || !ctx.store.docs.has(name) ? link(from, label ?? site.titleOf(name), p) : toRelated(from, name);
+    const o = name.includes('/') ? null : site.originalOf(name);
+    if (o) return link(from, label ?? site.labelOf(name), o);
+    const ch = site.chapterOf(name);
+    return ch ? link(from, label ?? ch.title, { file: ch.file }) : mdText(label ?? name);
   });
 
   /** 이력 항목 끝에 그 버전의 원문 링크를 붙이고 표식을 걷어낸다. */
@@ -107,6 +89,51 @@ function makeRenderer(ctx, site, assets) {
     return wiki(from, out.join('\n').replace(MARK, '').replace(/<!--[\s\S]*?-->/g, ''));
   }
 
+  /** 지난 결정의 짧은 이름. 같은 결정의 이전 버전이면 `v1 · 날짜`, 이름이 다른 결정이면 그 이름과 날짜. */
+  const pastTitle = (p, now) => [stem(p.name) === stem(now.name) ? versionLabel(p.name) : `${site.labelOf(p.name)} (이전 결정)`, p.date].filter(Boolean).join(' · ') || p.title;
+
+  /** 장 끝에 접어 두는 근거 문서 목록. 상태·버전·예외를 여기서 알린다. */
+  function sources(from, chapter) {
+    const rows = [];
+    const atom = (n) => { const d = ctx.store.docs.get(n); return d?.kind === 'atom' ? d : null; };
+    for (const n of chapter.atoms ?? []) { const d = atom(n); if (d) rows.push(`- ${toOriginal(from, n, site.labelOf(n))} · ${stateOf(d)}`); }
+    for (const n of chapter.dropped ?? []) { const d = atom(n); if (d) rows.push(`- ${toOriginal(from, n, site.labelOf(n))} · ${stateOf(d)} · 후속 결정 없음`); }
+    for (const n of chapter.layers ?? []) {
+      const d = ctx.store.docs.get(n);
+      if (d && site.originalOf(n)) rows.push(`- ${toOriginal(from, n, levelOf(d) ? `L${levelOf(d)} · ${site.labelOf(n)}` : site.labelOf(n))} · Layer 문서`);
+    }
+    for (const id of chapter.context ?? []) {
+      const c = ctx.context.find((x) => x.id === id);
+      if (c && site.originalOf(id)) rows.push(`- ${toOriginal(from, id, site.labelOf(id))} · ${KIND[c.kind] ?? c.kind}`);
+    }
+    return rows.length ? details(`이 장의 근거 문서 ${rows.length}편`, rows.join('\n')) : '';
+  }
+
+  /** 원문 쪽 맨 위: 이 원문을 근거로 쓴 장으로 돌아가는 줄. */
+  const backLine = (from, name) => {
+    const list = site.chaptersOf(name);
+    return list.length ? `← 본문으로 돌아가기 · ${list.map(({ page, anchor }) => link(from, page.title, { file: page.file, anchor })).join(' · ')}` : '';
+  };
+
+  /** 원문 쪽 아래: 이 결정을 참조하는 현행 결정과 충돌. 정방향 관계는 원문의 Relations에 있다. */
+  const backlinks = (from, d) => {
+    if (d.kind !== 'atom' || !d.live) return '';
+    const refs = [];
+    const clash = [];
+    for (const { rel, from: other } of ctx.relations.in.get(d.name) ?? []) {
+      const o = ctx.store.docs.get(other);
+      if (rel !== 'part_of' && o.kind === 'atom' && o.live && !refs.includes(other)) refs.push(other);
+    }
+    for (const c of ctx.relations.clashes) {
+      if (c.from === d.name && !clash.includes(c.to)) clash.push(c.to);
+      if (c.to === d.name && !clash.includes(c.from)) clash.push(c.from);
+    }
+    const lines = [];
+    if (refs.length) lines.push(`- 이 결정을 참조: ${refs.map((n) => toOriginal(from, n, site.labelOf(n))).join(', ')}`);
+    if (clash.length) lines.push(`- 충돌: ${clash.map((n) => toOriginal(from, n, site.labelOf(n))).join(', ')}`);
+    return lines.length ? ['**이어진 결정**', '', ...lines].join('\n') : '';
+  };
+
   const copyAssetFrom = (dir) => (dest) => {
     const f = path.resolve(dir, dest.replaceAll('\\', '/'));
     if (!IMAGE.has(path.extname(f).toLowerCase()) || !fs.existsSync(f)) return null;
@@ -116,98 +143,136 @@ function makeRenderer(ctx, site, assets) {
     return name;
   };
 
-  function originalPage(o) {
+  /** 부록 원문 한 쪽. 원문은 표식 사이에 그대로 두고, 프론트매터는 맨 아래 "문서 정보"에 접어 둔다. */
+  function originalPage(o, extra = '') {
     const dir = path.dirname(o.source);
     const next = (ctx.lineage.next.get(o.name) ?? []).map((n) => toOriginal(o.file, n, site.titleOf(n)));
-    const section = site.sectionOf(o.contextId && o.group === 'context' ? o.contextId : o.name);
-    const note = [o.note, next.length ? `대체한 결정: ${next.join(', ')}` : '', section ? link(o.file, '본문에서 보기', section) : ''].filter(Boolean).join(' · ');
+    const note = [o.note, next.length ? `대체한 결정: ${next.join(', ')}` : ''].filter(Boolean).join(' · ');
     const content = o.code ? fenced(o.code, o.body) : rewriteOriginal(o.body, {
       fromFile: o.file,
       resolveWiki: (n) => site.originalOf(n),
       resolvePath: (p) => site.originalOfFile(path.resolve(dir, p.replaceAll('\\', '/'))),
       copyAsset: copyAssetFrom(dir),
     });
-    const parts = [`# ${mdText(o.title)}`];
+    const parts = [backLine(o.file, o.contextId && o.group === 'context' ? o.contextId : o.name), `# ${mdText(o.title)}`];
     if (note) parts.push(`> ${note}`);
-    if (o.raw !== null) parts.push(fenced('yaml', o.raw));
     parts.push(`${ORIGINAL_BEGIN}\n${content}\n${ORIGINAL_END}`);
-    return parts.join('\n\n') + '\n';
+    if (o.doc) parts.push(backlinks(o.file, o.doc));
+    parts.push(extra);
+    if (o.raw !== null) parts.push(details('문서 정보', fenced('yaml', o.raw)));
+    return parts.filter(Boolean).join('\n\n') + '\n';
   }
 
-  return { link, toOriginal, toPlace, stateLines, related, exceptions, wiki, body, originalPage };
+  return { link, toOriginal, toPlace, stateOf, groupTitle, pastTitle, wiki, body, sources, originalPage };
 }
 
-function contextLine(r, from, chapter, part, ctx) {
-  if (part.id === BACKGROUND) return '';
-  const list = (chapter.context ?? []).filter((id) => ctx.context.some((c) => c.id === id)).map((id) => r.toPlace(from, id));
-  return list.length ? `관련 기획서: ${list.join(', ')}` : '';
-}
-
-function droppedSection(r, from, chapter, ctx) {
-  const docs = (chapter.dropped ?? []).map((n) => ctx.store.docs.get(n)).filter(Boolean);
-  if (!docs.length) return '';
-  return ['## 폐기된 결정', '', ...docs.map((d) => `- **${mdText(d.title)}** — ${r.wiki(from, d.summary)} ${r.toOriginal(from, d.name)}`)].join('\n');
-}
-
-function chapterPage(page, ctx, r) {
-  const { file, part, chapter, manuscript } = page;
-  const graph = chapterGraph(chapter.atoms ?? [], ctx);
-  const docsOf = (names) => names.map((n) => ctx.store.docs.get(n)).filter((d) => d?.kind === 'atom');
-  const out = [`# ${mdText(chapter.title)}`];
+function chapterPage(page, ctx, r, site) {
+  const { file, chapter, manuscript } = page;
+  const out = [`# ${mdText(page.title)}`];
   const push = (...parts) => out.push(...parts.filter(Boolean));
-  const figure = graph ? fenced('mermaid', toMermaid(graph)) : '';
   if (manuscript) {
-    push(r.wiki(file, manuscript.intro), contextLine(r, file, chapter, part, ctx));
-    const listed = manuscript.sections.filter((s) => docsOf(s.atoms).length);
-    if (listed.length) push('**이 장의 결정**', listed.map((s) => `- [${mdText(s.title)}](#${s.atoms[0]}) — ${docsOf(s.atoms).map((d) => mdText(d.title)).join(' / ')}`).join('\n'));
-    push(figure);
-    for (const s of manuscript.sections) {
-      const docs = docsOf(s.atoms);
-      const id = [...s.atoms, ...s.layers, ...s.context][0];
-      push(`## ${s.title}${id ? anchorTag(id) : ''}`, r.stateLines(file, docs));
-      if (!docs.length && id) push([...s.layers, ...s.context].map((n) => r.toOriginal(file, n, `${ctx.store.docs.get(n)?.title ?? ctx.context.find((c) => c.id === n)?.title ?? n} 원문`)).filter(Boolean).join(' · '));
-      push(r.body(file, s.text), r.exceptions(file, docs), r.related(file, docs));
-    }
+    push(r.wiki(file, manuscript.intro));
+    for (const s of manuscript.sections) push(`## ${s.title}${s.anchor ? anchorTag(s.anchor) : ''}`, r.body(file, s.text));
   } else {
-    push(`> 아직 편집하지 않은 장입니다. ${part.id === BACKGROUND ? '원문으로 이어집니다.' : '결정마다 한 문장 요약을 원문 그대로 싣습니다.'}`, contextLine(r, file, chapter, part, ctx), figure);
-    for (const d of docsOf(chapter.atoms ?? [])) {
-      const past = ctx.lineage.thread(d.name).slice(0, -1);
-      push(`## ${mdText(d.title)}${anchorTag(d.name)}`, r.stateLines(file, [d]), r.wiki(file, d.summary));
-      if (past.length) push('**지난 결정**', past.map((p) => `- ${[versionLabel(p.name), p.date].filter(Boolean).join(' · ')} ${r.toOriginal(file, p.name, p.title)}`).join('\n'));
-      push(r.exceptions(file, [d]), r.related(file, [d]));
+    push('> 이 장은 아직 편집하지 않았습니다. 결정마다 한 문장 요약을 원문 그대로 싣습니다.');
+    for (const n of chapter.atoms ?? []) {
+      const d = ctx.store.docs.get(n);
+      if (d?.kind !== 'atom') continue;
+      const past = ctx.lineage.thread(n).slice(0, -1);
+      push(`## ${mdText(site.labelOf(n))}${anchorTag(n)}`, r.wiki(file, d.summary), `${r.toOriginal(file, n)} · ${r.stateOf(d)}`);
+      if (past.length) push(`지난 결정: ${past.map((p) => r.toOriginal(file, p.name, r.pastTitle(p, d))).join(', ')}`);
     }
-    if (part.id === BACKGROUND) {
-      for (const n of [...(chapter.layers ?? []), ...(chapter.context ?? [])]) {
-        const title = ctx.store.docs.get(n)?.title ?? ctx.context.find((c) => c.id === n)?.title ?? n;
-        push(`## ${mdText(title)}${anchorTag(n)}`, r.toOriginal(file, n));
-      }
-    }
+    for (const id of chapter.context ?? []) if (site.originalOf(id)) push(`## ${mdText(site.labelOf(id))}${anchorTag(id)}`, r.toOriginal(file, id));
   }
-  push(droppedSection(r, file, chapter, ctx));
+  push(r.sources(file, chapter));
   return out.join('\n\n');
 }
 
-const listItem = (r, from, d) => `- ${r.toPlace(from, d.name)} · ${statusLabel(d.status)}`;
-const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.name < b.name ? -1 : 1);
+function coverPage(ctx, site, r, views) {
+  const file = 'README.md';
+  const out = [`# ${mdText(ctx.book.title)}`];
+  const push = (...parts) => out.push(...parts.filter(Boolean));
+  const o = site.opening;
+  if (o) {
+    push(r.wiki(file, o.intro));
+    for (const s of o.sections) push(`## ${s.title}`, r.body(file, s.text));
+  }
+  push('## 읽는 순서');
+  const parts = (ctx.book.parts ?? []).filter((p) => site.chapterPages.some((c) => c.part === p));
+  for (const part of parts) {
+    if (parts.length > 1) push(`### ${mdText(site.titles.part.get(part.id))}`);
+    const rows = site.chapterPages.filter((c) => c.part === part).map((c) => `| ${r.link(file, c.title, c)} | ${mdText(c.chapter.lead ?? '')} |`);
+    push(['| 장 | 이 장에서 만나는 장면 |', '|---|---|', ...rows].join('\n'));
+  }
+  const first = site.chapterPages[0];
+  if (first) push(`**${r.link(file, `첫 장 읽기 → ${first.title}`, first)}**`);
+  const dates = [...ctx.store.docs.values()].map((d) => d.updated || d.created).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+  push('---', [
+    dates.length ? `기준 날짜: ${dates.at(-1)}` : '',
+    `결정의 원문은 ${r.link(file, APPENDIX_GROUP, { file: APPENDIX_INDEX })}에 Layer별로 있습니다. 본문 문단 끝의 링크가 그 문단의 근거 원문입니다.`,
+    views.length ? `${VIEW_GROUP}: ${views.map((v) => r.link(file, v.title, v)).join(' · ')}` : '',
+  ].filter(Boolean).join('\n\n'));
+  return out.join('\n\n');
+}
 
-function scopeView(file, ctx, r, site) {
+const STATUS_GUIDE = [
+  ['초안(draft)', '기록했지만 아직 확정하지 않은 결정입니다.'],
+  ['검증 중(pending)', '시험 중인 가설이나 값입니다. 무효화 조건이 함께 적혀 있습니다.'],
+  ['승인(approved)', '승인한 결정입니다.'],
+  ['시행(active)', '채택해 따르고 있는 결정입니다.'],
+  ['폐기(archived)', '지난 결정입니다. 지금의 결정 아래에 버전 순서로 있습니다.'],
+];
+
+const plain = (s) => s.replace(/\[\[([^[\]\n|]+)(?:\|([^[\]\n]+))?\]\]/g, (raw, n, l) => l ?? n);
+
+/** Layer 문서의 목적 첫 줄. 원문 그대로이며, 비어 있거나 미정이면 쓰지 않는다. */
+function purposeOf(doc) {
+  const s = doc.sections.find((x) => x.key === '목적');
+  const line = s?.text.split('\n').map((l) => l.replace(/^\s*[-*]\s*/, '').trim()).find(Boolean) ?? '';
+  return /^\[(MISSING|확인 필요|보류)/.test(line) ? '' : plain(line);
+}
+
+function appendixIndex(ctx, site, r, groups) {
+  const file = APPENDIX_INDEX;
+  const out = [
+    '# 원문을 읽는 법',
+    '본문 문단 끝의 링크는 그 문단의 근거가 된 원문으로 이어집니다. 원문은 고치지 않고 그대로 실었고, 링크만 책 안에서 통하게 바꿨습니다. 결정 하나가 문서(Atom) 하나이며, 결정이 속한 Layer(추상 계층)별로 묶었습니다. 바뀐 결정은 지금의 결정 아래에 지난 버전이 있습니다.',
+    ['| Layer | 다루는 것 | 결정 |', '|---|---|---|', ...groups.map((g) => {
+      const what = g.doc ? purposeOf(g.doc) : g.level ? `Layer 문서(part_of)를 적지 않은 L${g.level} 결정` : 'layer와 part_of를 적지 않은 결정';
+      return `| ${r.link(file, r.groupTitle(g), g)} | ${mdText(what)} | ${g.atoms.filter((d) => d.live).length}편 |`;
+    })].join('\n'),
+    '## 상태 읽는 법',
+    ['| 상태 | 뜻 |', '|---|---|', ...STATUS_GUIDE.map(([a, b]) => `| ${a} | ${b} |`)].join('\n'),
+  ];
+  const related = [
+    ...ctx.context.map((c) => {
+      const old = c.versions.length - 1;
+      return `- ${r.toOriginal(file, c.id, site.labelOf(c.id))} · ${[KIND[c.kind] ?? c.kind, c.versions.at(-1).label, old ? `이전 판 ${old}편` : ''].filter(Boolean).join(' · ')}`;
+    }),
+    ...[...ctx.store.maps].sort(byDate).map((m) => `- ${r.toOriginal(file, m.name, m.title)} · 분해 기록${m.date ? ` · ${m.date}` : ''}`),
+  ];
+  if (related.length) out.push('## 관련 문서', '기획서·지침처럼 결정의 바탕이 된 문서와, 요청을 결정으로 나눈 분해 기록입니다.', related.join('\n'));
+  return out.join('\n\n');
+}
+
+function decisionList(file, g, r, site) {
+  if (!g.atoms.length) return '';
+  const rows = g.atoms.map((d) => `- ${r.toOriginal(file, d.name, site.labelOf(d.name))} · ${r.stateOf(d)}${d.live ? '' : ' · 후속 결정 없음'}`);
+  return [g.doc ? '## 이 Layer의 결정' : '## 결정', rows.join('\n')].join('\n\n');
+}
+
+// --- 다른 순서로 보기 ---
+
+const listItem = (r, from, d) => `- ${r.toPlace(from, d.name)} · ${statusLabel(d.status)}`;
+
+function scopeView(file, ctx, r) {
   const live = ctx.store.atoms.filter((d) => d.live);
-  const out = ['# 구현 범위별', '현행 결정을 구현 범위로 묶었습니다.'];
-  if (live.some((d) => d.milestone)) {
-    out.push('## 마일스톤');
-    for (const m of [...new Set(live.map((d) => d.milestone))].sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a < b ? -1 : 1))) {
-      const docs = live.filter((d) => d.milestone === m).sort(byDate);
-      out.push(`### ${m ? mdText(m) : '마일스톤 없음'}`, docs.map((d) => listItem(r, file, d)).join('\n'));
-    }
+  if (!live.some((d) => d.milestone)) return '';
+  const out = ['# 마일스톤별', '현행 결정을 마일스톤으로 묶었습니다. Layer별 묶음은 부록에 있습니다.'];
+  for (const m of [...new Set(live.map((d) => d.milestone))].sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a < b ? -1 : 1))) {
+    const docs = live.filter((d) => d.milestone === m).sort(byDate);
+    out.push(`## ${m ? mdText(m) : '마일스톤 없음'}`, docs.map((d) => listItem(r, file, d)).join('\n'));
   }
-  out.push('## Layer 문서');
-  const parts = [...new Set(live.flatMap((d) => d.relations.part_of))].sort();
-  for (const p of parts) {
-    const docs = live.filter((d) => d.relations.part_of.includes(p)).sort(byDate);
-    out.push(`### ${site.originalOf(p) ? r.toOriginal(file, p, site.titleOf(p)) : mdText(p)}`, docs.map((d) => listItem(r, file, d)).join('\n'));
-  }
-  const none = live.filter((d) => !d.relations.part_of.length).sort(byDate);
-  if (none.length) out.push('### 소속 없음', none.map((d) => listItem(r, file, d)).join('\n'));
   return out.join('\n\n');
 }
 
@@ -248,60 +313,66 @@ function namesView(file, ctx, r, site) {
 }
 
 const VIEWS = [
-  ['views/by-scope.md', '구현 범위별', scopeView],
+  ['views/by-scope.md', '마일스톤별', scopeView],
   ['views/by-work.md', '작업 순서별', workView],
   ['views/changes.md', '변경 이력 모아보기', changesView],
   ['views/names.md', '이름 찾아보기', namesView],
 ];
-const VIEW_GROUP = '다른 순서로 보기';
-const APPENDIX_GROUP = '부록';
 
-function coverPage(ctx, pages) {
-  const dates = [...ctx.store.docs.values()].map((d) => d.updated || d.created).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
-  const toc = [];
-  let group = null;
-  for (const p of pages) {
-    if (p.parent) continue;
-    if (p.group !== group) { toc.push(`\n### ${mdText(p.group)}\n`); group = p.group; }
-    toc.push(`- [${mdText(p.title)}](${relLink('README.md', p.file)})`);
-  }
-  return [
-    `# ${mdText(ctx.book.title)}`,
-    `${dates.length ? `기준 날짜: ${dates.at(-1)}\n\n` : ''}## 읽는 법`,
-    ['- 본문은 주제별로 편집한 글입니다. 원문은 절마다 있는 "원문" 링크로 확인합니다.',
-      '- 여러 번 바뀐 결정은 "여기까지 온 과정"에 순서대로 적었고, 과거 결정 원문은 부록 A에 있습니다.',
-      '- 상태가 초안(draft)이나 검증 중(pending)인 결정은 확정된 것이 아닙니다.',
-      '- 구현 범위, 작업 순서, 이름으로 찾으려면 "다른 순서로 보기"를 봅니다.'].join('\n'),
-    '## 목차',
-    toc.join('\n').trim(),
-  ].join('\n\n');
-}
-
-function summaryPage(ctx, pages) {
-  const out = ['# 목차', '', `* [${mdText(ctx.book.title)}](README.md)`];
+function summaryPage(pages) {
+  const out = ['# 목차', '', `* [${OPENING_TITLE}](README.md)`];
   let group = null;
   for (const p of pages) {
     if (p.group !== group) { out.push('', `## ${mdText(p.group)}`, ''); group = p.group; }
-    out.push(`${p.parent ? '  ' : ''}* [${mdText(p.title)}](${relLink('SUMMARY.md', p.file)})`);
+    out.push(`${'  '.repeat(p.depth)}* [${mdText(p.title)}](${relLink('SUMMARY.md', p.file)})`);
   }
   return out.join('\n') + '\n';
+}
+
+/** 부록의 쪽들: 원문을 읽는 법(관련 문서와 분해 기록) → Layer 묶음(결정 → 지난 버전). */
+function appendixPages(ctx, site, r) {
+  const originals = new Map(site.originals.map((o) => [o.name, o]));
+  const order = new Map();
+  for (const p of site.chapterPages) for (const n of p.chapter.atoms ?? []) if (!order.has(n)) order.set(n, order.size);
+  const rank = (d) => (d.live ? 0 : 1);
+  const groups = layerGroups(ctx.store, ctx.lineage).map((g) => ({
+    ...g,
+    file: g.doc ? originals.get(g.doc.name).file : `appendix/layers/${g.id}.md`,
+    atoms: [...g.atoms].sort((a, b) => rank(a) - rank(b) || (order.get(a.name) ?? Infinity) - (order.get(b.name) ?? Infinity) || byDate(a, b)),
+  }));
+  const pages = [];
+  const placed = new Set();
+  const page = (file, title, depth, md, original = false) => pages.push({ file, title, group: APPENDIX_GROUP, depth, md, original });
+  const original = (name, title, depth, extra) => { const o = originals.get(name); placed.add(name); page(o.file, title, depth, r.originalPage(o, extra), true); };
+
+  page(APPENDIX_INDEX, '원문을 읽는 법', 0, appendixIndex(ctx, site, r, groups));
+  for (const c of ctx.context) {
+    original(c.versions.at(-1).name, site.labelOf(c.id), 1);
+    for (const v of c.versions.slice(0, -1)) original(v.name, `${site.labelOf(c.id)} ${v.label || '이전 판'}`, 2);
+  }
+  for (const m of [...ctx.store.maps].sort(byDate)) original(m.name, m.title, 1);
+  for (const g of groups) {
+    if (g.doc) original(g.doc.name, r.groupTitle(g), 0, decisionList(g.file, g, r, site));
+    else page(g.file, r.groupTitle(g), 0, [`# ${mdText(r.groupTitle(g))}`, g.level ? `layer가 ${g.level}이지만 part_of로 Layer 문서를 적지 않은 결정입니다.` : 'layer와 part_of를 적지 않은 결정입니다.', decisionList(g.file, g, r, site)].join('\n\n'));
+    for (const d of g.atoms) {
+      original(d.name, d.live ? site.labelOf(d.name) : `${site.labelOf(d.name)} (폐기)`, 1);
+      for (const p of ctx.lineage.thread(d.name).slice(0, -1)) if (!placed.has(p.name)) original(p.name, r.pastTitle(p, d), 2);
+    }
+  }
+  // 어디에도 매달리지 못한 원문(끝까지 폐기만 이어진 이력 등)도 빠뜨리지 않는다
+  for (const o of site.originals) if (!placed.has(o.name)) original(o.name, o.title, 0);
+  return pages;
 }
 
 export function buildMd(ctx) {
   const site = planSite(ctx);
   const assets = new Map();
   const r = makeRenderer(ctx, site, assets);
-  const pages = [];
-  for (const p of site.chapterPages) pages.push({ file: p.file, title: p.chapter.title, group: p.part.title, parent: null, md: chapterPage(p, ctx, r) });
-  for (const [file, title, render] of VIEWS) pages.push({ file, title, group: VIEW_GROUP, parent: null, md: render(file, ctx, r, site) });
-  for (const [g, title] of APPENDIX) {
-    const list = site.originals.filter((o) => o.group === g);
-    if (!list.length) continue;
-    const index = `appendix/${g}/README.md`;
-    pages.push({ file: index, title, group: APPENDIX_GROUP, parent: null, md: [`# ${title}`, list.map((o) => `- ${r.link(index, o.title, o)}${o.note ? ` · ${o.note}` : ''}`).join('\n')].join('\n\n') });
-    for (const o of list) pages.push({ file: o.file, title: o.title, group: APPENDIX_GROUP, parent: index, md: r.originalPage(o), original: true });
-  }
-  const cover = { file: 'README.md', title: ctx.book.title, group: null, parent: null, md: coverPage(ctx, pages) };
+  const pages = site.chapterPages.map((p) => ({ file: p.file, title: p.title, group: p.partTitle, depth: 0, md: chapterPage(p, ctx, r, site) }));
+  pages.push(...appendixPages(ctx, site, r));
+  const views = VIEWS.map(([file, title, render]) => ({ file, title, group: VIEW_GROUP, depth: 0, md: render(file, ctx, r, site) })).filter((v) => v.md);
+  pages.push(...views);
+  const cover = { file: 'README.md', title: OPENING_TITLE, group: null, depth: 0, md: coverPage(ctx, site, r, views) };
   const all = [cover, ...pages];
   if (ctx.book.localNav !== false) {
     all.forEach((p, i) => {
@@ -314,7 +385,7 @@ export function buildMd(ctx) {
   }
   const files = new Map(assets);
   for (const p of all) files.set(p.file, p.original ? p.md : tidy(p.md));
-  files.set('SUMMARY.md', summaryPage(ctx, pages));
+  files.set('SUMMARY.md', summaryPage(pages));
   files.set('.gitbook.yaml', 'root: ./\nstructure:\n  readme: README.md\n  summary: SUMMARY.md\n');
   publishDir(path.join(ctx.bookDir, 'md'), files);
   return all;

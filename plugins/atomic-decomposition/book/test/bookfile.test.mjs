@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { copyProject, rootOf, write, read, exists, hashTree, runCli, FIX } from './util.mjs';
 import { loadStore } from '../lib/store.mjs';
-import { readBook, chapters, validateOutline, openBook } from '../lib/bookfile.mjs';
+import { readBook, chapters, entries, titles, chapterRef, validateOutline, openBook } from '../lib/bookfile.mjs';
 import { loadContext } from '../lib/context.mjs';
 import { BOOK, makeBook } from './samplebook.mjs';
 
@@ -12,7 +12,7 @@ const store = loadStore(rootOf(FIX));
 const bookDir = path.join(FIX, 'docs', 'atomic-book');
 const check = (book) => validateOutline(book, store, loadContext(book, bookDir).docs);
 const change = (fn) => { const b = structuredClone(BOOK); fn(b); return b; };
-const limits = (b) => b.parts[1].chapters[0];
+const limits = (b) => b.parts[0].chapters[1];
 
 test('책이 없으면 null이고 스키마가 다르면 알린다', () => {
   assert.equal(readBook(FIX), null);
@@ -22,36 +22,68 @@ test('책이 없으면 null이고 스키마가 다르면 알린다', () => {
   assert.throws(() => readBook(path.join(q, 'x')), /book\.json/);
 });
 
-test('장을 순서대로 내놓는다', () => {
-  assert.deepEqual([...chapters(BOOK)].map((e) => e.key), ['background/vision', 'background/plan', 'loan/limits', 'notice/channels']);
+test('장을 순서대로 내놓고, 여는 글이 맨 앞이다', () => {
+  assert.deepEqual([...chapters(BOOK)].map((e) => e.key), ['loan/plan', 'loan/limits', 'notice/channels']);
+  assert.deepEqual([...entries(BOOK)].map((e) => e.key), ['opening', 'loan/plan', 'loan/limits', 'notice/channels']);
+});
+
+test('부·장 번호는 책 전체에서 이어지고 끌 수 있다', () => {
+  const t = titles(BOOK);
+  assert.deepEqual([...t.part.values()], ['1부 · 책을 빌리는 사람', '2부 · 알림을 받는 사람']);
+  assert.deepEqual([...t.chapter.values()], ['1장. 기획서가 정한 것', '2장. 대출 한도', '3장. 알림 수단']);
+  assert.deepEqual([...titles(change((b) => { b.numbering = false; })).chapter.values()], ['기획서가 정한 것', '대출 한도', '알림 수단']);
+});
+
+test('장 이름 링크는 부/장이나 하나뿐인 장 id로 찾는다', () => {
+  assert.equal(chapterRef(BOOK, 'notice/channels').key, 'notice/channels');
+  assert.equal(chapterRef(BOOK, 'limits').key, 'loan/limits');
+  assert.equal(chapterRef(BOOK, 'nope'), null);
+  assert.equal(chapterRef(change((b) => { b.parts[1].chapters.push({ id: 'limits', title: '또' }); }), 'limits'), null);
 });
 
 test('바른 목차는 문제가 없다', () => {
   assert.deepEqual(check(BOOK), { missing: [], duplicate: [], unknown: [], archived: [], problems: [] });
 });
 
-test('빠진 것, 겹친 것, 없는 것, archived를 찾는다', () => {
+test('빠진 것, 한 장에 겹친 것, 없는 것, archived를 찾는다', () => {
   const r = check(change((b) => {
-    limits(b).atoms = limits(b).atoms.filter((n) => n !== 'loan_return_rule_v2').concat('nope_v1', 'loan_limit_decision_v1');
+    limits(b).atoms = limits(b).atoms.filter((n) => n !== 'loan_return_rule_v2').concat('nope_v1', 'loan_limit_decision_v1', 'loan_fee_values_rnd_v1');
     limits(b).dropped = [];
-    b.parts[2].chapters.push({ id: 'again', title: '또', atoms: ['notice_feedback_v1'] });
   }));
-  assert.deepEqual(r.missing, ['loan_dropped_rnd_v1', 'loan_return_rule_v2']);
-  assert.deepEqual(r.duplicate, ['notice_feedback_v1']);
+  assert.deepEqual(r.missing, ['loan_return_rule_v2']);
+  assert.deepEqual(r.duplicate, ['loan_fee_values_rnd_v1']);
   assert.deepEqual(r.unknown, ['nope_v1']);
   assert.deepEqual(r.archived, ['loan_limit_decision_v1']);
 });
 
-test('편집할 기획서가 배경 부에 없거나 id가 잘못되면 알린다', () => {
-  const r = check(change((b) => { b.parts[0].chapters.pop(); limits(b).id = '한도'; limits(b).context = ['zzz']; }));
-  assert.equal(r.problems.length, 3);
-  assert.ok(r.problems.some((x) => /plan/.test(x)));
+test('같은 결정은 여러 장에 나와도 되고, 후속 없는 폐기는 따로 두지 않아도 된다', () => {
+  const r = check(change((b) => { limits(b).dropped = []; b.parts[1].chapters.push({ id: 'again', title: '또', atoms: ['notice_feedback_v1'] }); }));
+  assert.deepEqual(r, { missing: [], duplicate: [], unknown: [], archived: [], problems: [] });
+});
+
+test('appendixOnly는 본문에 싣지 않는 결정이고 본문과 겹치면 알린다', () => {
+  const r = check(change((b) => { b.parts[1].chapters[0].atoms = ['notice_time_rule_v1']; b.appendixOnly = ['notice_no_sms_rule_v1', 'notice_feedback_v1', 'notice_time_rule_v1', 'zzz_v1']; }));
+  assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.duplicate, ['notice_time_rule_v1']);
+  assert.deepEqual(r.unknown, ['zzz_v1']);
+});
+
+test('편집할 기획서가 어느 장에도 없거나, 원문만 실을 문서를 장에 넣거나, id가 잘못되면 알린다', () => {
+  const r = check(change((b) => { b.parts[0].chapters[0].context = ['prompt']; limits(b).id = '한도'; limits(b).context = ['zzz']; }));
+  assert.equal(r.problems.length, 4, r.problems.join('\n'));
+  assert.ok(r.problems.some((x) => /편집할 컨텍스트 문서 plan/.test(x)));
+  assert.ok(r.problems.some((x) => /원문만 싣는 컨텍스트 문서 prompt/.test(x)));
   assert.ok(r.problems.some((x) => /한도/.test(x)));
   assert.ok(r.problems.some((x) => /zzz/.test(x)));
 });
 
+test('labels와 dropped, lead가 잘못되면 알린다', () => {
+  const r = check(change((b) => { b.labels.nope_v1 = '없음'; b.labels.loan_return_rule_v2 = ' '; limits(b).dropped = ['loan_return_rule_v2']; limits(b).lead = ['목록']; }));
+  assert.equal(r.problems.length, 4, r.problems.join('\n'));
+});
+
 test('장 key가 겹치면 알린다', () => {
-  const r = check(change((b) => { b.parts[2].chapters.push({ id: 'channels', title: '겹침', atoms: [] }); }));
+  const r = check(change((b) => { b.parts[1].chapters.push({ id: 'channels', title: '겹침', atoms: [] }); }));
   assert.ok(r.problems.some((x) => /notice\/channels/.test(x)));
 });
 

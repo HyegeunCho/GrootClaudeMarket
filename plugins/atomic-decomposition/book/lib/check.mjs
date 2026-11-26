@@ -4,8 +4,8 @@ import path from 'node:path';
 import { readText, toPosix, walkFiles } from './fsutil.mjs';
 import { wikiNames } from './store.mjs';
 import { splitCode, outsideCode, findLinks, linkKind, localPath } from './links.mjs';
-import { chapters, validateOutline, BACKGROUND } from './bookfile.mjs';
-import { chapterStatus, hash, manuscriptFile, openLines, sectionNumbers, sectionSources, wholeChapter } from './bundle.mjs';
+import { entries, validateOutline, titles, chapterRef } from './bookfile.mjs';
+import { chapterStatus, hash, manuscriptFile, openLines, renderBundle, sectionNumbers, sectionSources, wholeChapter } from './bundle.mjs';
 import { parseManuscript } from './manuscript.mjs';
 import { planSite } from './site.mjs';
 import { fenced, ORIGINAL_BEGIN, ORIGINAL_END } from './build-md.mjs';
@@ -20,7 +20,6 @@ export function numberTokens(text) {
 
 const sourceNumbers = (text) => new Set([...text.matchAll(NUMBER)].map((m) => m[1].replaceAll(',', '')));
 const inlineCodes = (text) => splitCode(text).filter((p) => p.code && /^`/.test(p.text) && !/^`{3,}[^`\n]*\n/.test(p.text)).map((p) => p.text.replace(/^`+\s?|\s?`+$/g, ''));
-const times = (list, x) => list.filter((y) => y === x).length;
 
 // 이력 항목 머리의 버전과 날짜: `**v2 (2026-11-17)** …`
 const HEAD = /^\*\*(.+?)\*\*/;
@@ -46,81 +45,94 @@ export function originalFingerprint(text) {
     .replace(/[[\]!<>\\\s]/g, '');
 }
 
+/** 원고 H1의 `1장.` 같은 번호는 도구가 붙이는 것이므로 검사에서 뺀다. */
+const withoutNumber = (title) => title.replace(/^\d+\s*장\s*[.:·]?\s*/, '');
+
 export function checkChapter(entry, ctx) {
-  const { key, chapter, part } = entry;
+  const { key, chapter } = entry;
   const file = manuscriptFile(ctx.bookDir, key);
   const out = [];
   const add = (level, code, section, message) => out.push({ level, code, chapter: key, section, message });
   if (!fs.existsSync(file)) {
-    add('warn', 'unwritten', '', '원고가 없어 요약만 싣습니다');
+    add('warn', 'unwritten', '', entry.opening ? '여는 글이 없어 표지에 읽는 순서만 싣습니다' : '원고가 없어 요약만 싣습니다');
     return out;
   }
   const text = readText(file);
   const m = parseManuscript(text);
-  const sourceOf = (section) => ({
-    text: [chapter.title, sectionSources(section, ctx)].join('\n'),
-    numbers: sourceNumbers([chapter.title, sectionNumbers(section, ctx)].join('\n')),
-  });
-  const wholeSource = sourceOf(wholeChapter(entry));
-
-  // 빠짐
-  const cover = (kind, wanted, required) => {
-    const placed = m.sections.flatMap((s) => s[kind]);
-    if (required) for (const n of wanted) if (!placed.includes(n)) add('error', 'coverage', '', `어느 절에도 없습니다: ${n}`);
-    for (const n of new Set(placed)) {
-      if (!wanted.includes(n)) add('error', 'coverage', '', `이 장의 목차에 없습니다: ${n}`);
-      else if (times(placed, n) > 1) add('error', 'coverage', '', `두 절에 있습니다: ${n}`);
-    }
-  };
-  cover('atoms', chapter.atoms ?? [], true);
-  cover('layers', chapter.layers ?? [], part.id === BACKGROUND);
-  cover('context', part.id === BACKGROUND ? chapter.context ?? [] : [], true);
-
   const facts = (sectionTitle, body, source) => {
     for (const c of inlineCodes(body)) if (!source.text.includes(c)) add('error', 'identifier', sectionTitle, `원문에 없는 식별자: \`${c}\``);
     for (const n of numberTokens(`${sectionTitle}\n\n${outsideCode(body)}`)) if (!source.numbers.has(n)) add('error', 'number', sectionTitle, `원문에 없는 숫자: ${n}`);
   };
-  facts('', `${m.title}\n\n${m.intro}`, wholeSource);
 
-  for (const s of m.sections) {
-    const marked = s.atoms.length + s.layers.length + s.context.length > 0;
-    if (!marked && !s.open) add('error', 'coverage', s.title, '원문 표식(<!-- atoms: … -->)이 없는 절입니다');
-    facts(s.title, s.text, marked ? sourceOf(s) : wholeSource);
+  if (entry.opening) {
+    // 여는 글은 발췌 전체(차례, L0, 현행 결정의 요약)를 원문으로 삼는다
+    const src = renderBundle(entry, ctx);
+    const source = { text: src, numbers: sourceNumbers(src) };
+    facts('', `${m.title}\n\n${m.intro}`, source);
+    for (const s of m.sections) facts(s.title, s.text, source);
+  } else {
+    const display = titles(ctx.book).chapter.get(key) ?? '';
+    const sourceOf = (section) => ({
+      text: [display, chapter.title, sectionSources(section, ctx)].join('\n'),
+      numbers: sourceNumbers([display, chapter.title, sectionNumbers(section, ctx)].join('\n')),
+    });
+    const wholeSource = sourceOf(wholeChapter(entry));
 
-    // 이력
-    const threads = new Map();
-    for (const n of s.atoms) if (ctx.store.docs.has(n)) threads.set(n, ctx.lineage.thread(n).map((d) => ({ version: versionOf(d.name), date: d.date })));
-    for (const id of s.context) threads.set(id, (ctx.context.find((c) => c.id === id)?.versions ?? []).map((v) => ({ version: versionOf(`_${v.label}`), date: '' })));
-    for (const [n, thread] of threads) {
-      const found = s.history.filter((h) => h.name === n);
-      const bad = (code, message) => add('error', code, s.title, message);
-      if (thread.length > 1 && found.length !== 1) bad('history-count', `${n}의 이력(${thread.length}건)이 ${found.length}번 나옵니다`);
-      else if (thread.length > 1 && found[0].items.length !== thread.length) bad('history-count', `${n}의 이력은 ${thread.length}건인데 ${found[0].items.length}건만 있습니다`);
-      else if (thread.length > 1) {
-        found[0].items.forEach((item, i) => {
-          const head = item.match(HEAD)?.[1] ?? '';
-          const version = head.match(VERSION)?.[1];
-          const date = head.match(DATE)?.[0];
-          const t = thread[i];
-          if ((version && t.version && version !== t.version) || (date && t.date && date !== t.date)) bad('history-order', `${n}의 이력 ${i + 1}번은 ${[t.version && `v${t.version}`, t.date].filter(Boolean).join(' · ')}인데 "${head}"로 적었습니다`);
-        });
-      } else if (found.length) bad('history-count', `${n}에는 이력이 없습니다`);
+    // 빠짐: 목차의 결정과 컨텍스트 문서는 어느 절엔가 표식이 있어야 한다. 여러 절에 나와도 된다
+    const cover = (kind, wanted, required) => {
+      const placed = m.sections.flatMap((s) => s[kind]);
+      if (required) for (const n of wanted) if (!placed.includes(n)) add('error', 'coverage', '', `어느 절에도 없습니다: ${n}`);
+      for (const n of new Set(placed)) if (!wanted.includes(n)) add('error', 'coverage', '', `이 장의 목차에 없습니다: ${n}`);
+    };
+    cover('atoms', chapter.atoms ?? [], true);
+    cover('layers', chapter.layers ?? [], false);
+    cover('context', chapter.context ?? [], true);
+
+    facts('', `${withoutNumber(m.title)}\n\n${m.intro}`, wholeSource);
+    if (chapter.lead) facts('장면(lead)', chapter.lead, wholeSource);
+
+    for (const s of m.sections) {
+      const marked = s.atoms.length + s.layers.length + s.context.length > 0;
+      if (!marked && !s.open) add('error', 'coverage', s.title, '원문 표식(<!-- atoms: … -->)이 없는 절입니다');
+      facts(s.title, s.text, marked ? sourceOf(s) : wholeSource);
+
+      // 이력: 쓰는 것은 고르되, 쓰면 수·순서·날짜가 원문과 같아야 한다
+      const threads = new Map();
+      for (const n of s.atoms) if (ctx.store.docs.has(n)) threads.set(n, ctx.lineage.thread(n).map((d) => ({ version: versionOf(d.name), date: d.date })));
+      for (const id of s.context) threads.set(id, (ctx.context.find((c) => c.id === id)?.versions ?? []).map((v) => ({ version: versionOf(`_${v.label}`), date: '' })));
+      for (const [n, thread] of threads) {
+        const found = s.history.filter((h) => h.name === n);
+        const bad = (code, message) => add('error', code, s.title, message);
+        if (!found.length) continue;
+        if (found.length > 1) bad('history-count', `${n}의 이력이 ${found.length}번 나옵니다`);
+        else if (thread.length < 2) bad('history-count', `${n}에는 이력이 없습니다`);
+        else if (found[0].items.length !== thread.length) bad('history-count', `${n}의 이력은 ${thread.length}건인데 ${found[0].items.length}건만 있습니다`);
+        else {
+          found[0].items.forEach((item, i) => {
+            const head = item.match(HEAD)?.[1] ?? '';
+            const version = head.match(VERSION)?.[1];
+            const date = head.match(DATE)?.[0];
+            const t = thread[i];
+            if ((version && t.version && version !== t.version) || (date && t.date && date !== t.date)) bad('history-order', `${n}의 이력 ${i + 1}번은 ${[t.version && `v${t.version}`, t.date].filter(Boolean).join(' · ')}인데 "${head}"로 적었습니다`);
+          });
+        }
+      }
+      for (const h of s.history) if (!threads.has(h.name)) add('error', 'history-count', s.title, `이 절에 속하지 않은 이력입니다: ${h.name}`);
     }
-    for (const h of s.history) if (!threads.has(h.name)) add('error', 'history-count', s.title, `이 절에 속하지 않은 이력입니다: ${h.name}`);
-  }
 
-  // 미정
-  const openNames = new Set(m.sections.filter((s) => s.open).flatMap((s) => wikiNames(outsideCode(s.text))));
-  for (const n of chapter.atoms ?? []) {
-    const d = ctx.store.docs.get(n);
-    if (d?.live && openLines(d).length && !openNames.has(n)) add('error', 'open-missing', '', `"아직 정해지지 않은 것"에 [[${n}]]이 없습니다`);
+    // 미정
+    const openNames = new Set(m.sections.filter((s) => s.open).flatMap((s) => wikiNames(outsideCode(s.text))));
+    for (const n of chapter.atoms ?? []) {
+      const d = ctx.store.docs.get(n);
+      if (d?.live && openLines(d).length && !openNames.has(n)) add('error', 'open-missing', '', `"아직 정해지지 않은 것"에 [[${n}]]이 없습니다`);
+    }
   }
 
   // 링크와 잔여
   const prose = outsideCode(text);
   for (const n of new Set(wikiNames(prose))) {
-    if (ctx.store.docs.has(n) || ctx.context.some((c) => c.id === n)) continue;
-    add(ctx.relations.external.has(n) ? 'warn' : 'error', 'unknown-link', '', ctx.relations.external.has(n) ? `책 밖의 이름이라 글자로 싣습니다: ${n}` : `저장소에 없는 이름입니다: ${n}`);
+    if (ctx.store.docs.has(n) || ctx.context.some((c) => c.id === n) || chapterRef(ctx.book, n)) continue;
+    add(ctx.relations.external.has(n) ? 'warn' : 'error', 'unknown-link', '', ctx.relations.external.has(n) ? `책 밖의 이름이라 글자로 싣습니다: ${n}` : `저장소에도 목차에도 없는 이름입니다: ${n}`);
   }
   if (prose.includes('{{')) add('error', 'leftover', '', '자리표시자 {{가 남았습니다');
 
@@ -139,14 +151,14 @@ export function checkBook(ctx) {
   const out = [];
   const add = (level, code, message) => out.push({ level, code, chapter: '', section: '', message });
   const r = validateOutline(ctx.book, ctx.store, ctx.context);
-  for (const n of r.missing) add('error', 'outline', `목차에 없는 결정: ${n}`);
-  for (const n of r.duplicate) add('error', 'outline', `두 번 나오는 결정: ${n}`);
+  for (const n of r.missing) add('error', 'outline', `목차에 없는 결정: ${n} (본문에 싣지 않으려면 appendixOnly에 넣습니다)`);
+  for (const n of r.duplicate) add('error', 'outline', `한 장에 두 번, 또는 본문과 appendixOnly에 함께 있는 결정: ${n}`);
   for (const n of r.unknown) add('error', 'outline', `저장소에 없는 이름: ${n}`);
   for (const n of r.archived) add('error', 'outline', `archived인데 현행 자리에 있는 결정: ${n}`);
   for (const p of r.problems) add('error', 'outline', p);
   for (const p of ctx.contextProblems) add('error', 'context', `${p.file}: ${p.message}`);
   for (const p of ctx.store.problems) add('warn', 'store', `${p.file}: ${p.message}`);
-  for (const e of chapters(ctx.book)) out.push(...checkChapter(e, ctx));
+  for (const e of entries(ctx.book)) out.push(...checkChapter(e, ctx));
   return out;
 }
 
@@ -164,7 +176,7 @@ export function checkBuilt(ctx) {
     const to = text.lastIndexOf(ORIGINAL_END);
     const block = from >= 0 && to > from ? text.slice(from + ORIGINAL_BEGIN.length, to) : null;
     const same = block !== null && (o.code ? block.trim() === fenced(o.code, o.body).trim() : originalFingerprint(block) === originalFingerprint(o.body));
-    const rawKept = o.raw === null || text.slice(0, Math.max(from, 0)).includes(fenced('yaml', o.raw));
+    const rawKept = o.raw === null || (to >= 0 && text.slice(to).includes(fenced('yaml', o.raw)));
     if (!same || !rawKept) add('error', 'original-changed', `md/${o.file}`, '부록 원문이 원본과 다릅니다. 다시 build하고, 그래도 나오면 링크 표기를 옮기지 못한 것이니 사용자에게 알리세요');
   }
 

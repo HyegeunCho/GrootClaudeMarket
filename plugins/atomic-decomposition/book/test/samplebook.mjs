@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { copyProject, write } from './util.mjs';
-import { openBook, readState, writeState, chapters } from '../lib/bookfile.mjs';
+import { openBook, readState, writeState, entries } from '../lib/bookfile.mjs';
 import { renderBundle, bundleHash, hash, manuscriptFile } from '../lib/bundle.mjs';
 import { readText } from '../lib/fsutil.mjs';
 
@@ -15,25 +15,24 @@ export const BOOK = {
     { id: 'plan', title: '대출 기획서', kind: 'plan', mode: 'edit', versions: [{ label: 'v1', path: '../Plan_v1.md' }, { label: 'v2', path: '../Plan_v2.md' }] },
     { id: 'prompt', title: '안내문 프롬프트', kind: 'prompt', mode: 'appendix', versions: [{ path: '../안내문 프롬프트 (초안).md' }] },
   ],
+  labels: {
+    loan_limit_decision_v3: '다시 빌리는 주기',
+    loan_return_rule_v2: '반납 순서',
+    L1_loan_system: '대출의 규칙',
+  },
   parts: [
     {
-      id: 'background', title: '배경',
+      id: 'loan', title: '책을 빌리는 사람',
       chapters: [
-        { id: 'vision', title: '비전', layers: ['L0_vision'] },
-        { id: 'plan', title: '대출 기획서', context: ['plan'] },
-      ],
-    },
-    {
-      id: 'loan', title: '대출',
-      chapters: [
+        { id: 'plan', title: '기획서가 정한 것', lead: '기획서를 펼칩니다. 대출 권수는 어디에서 정할까요?', context: ['plan'] },
         {
-          id: 'limits', title: '대출 한도', layers: ['L1_loan_system'], context: ['plan'],
+          id: 'limits', title: '대출 한도', lead: '책을 빌리러 왔습니다. 몇 권까지 빌릴 수 있을까요?', layers: ['L1_loan_system'],
           atoms: ['concept_loan_item_v2', 'loan_limit_decision_v3', 'loan_fee_values_rnd_v1', 'loan_return_rule_v2'],
           dropped: ['loan_dropped_rnd_v1'],
         },
       ],
     },
-    { id: 'notice', title: '알림', chapters: [{ id: 'channels', title: '알림 수단', atoms: ['notice_time_rule_v1', 'notice_no_sms_rule_v1', 'notice_feedback_v1'] }] },
+    { id: 'notice', title: '알림을 받는 사람', chapters: [{ id: 'channels', title: '알림 수단', lead: '알림이 옵니다. 언제, 무엇으로 올까요?', atoms: ['notice_time_rule_v1', 'notice_no_sms_rule_v1', 'notice_feedback_v1'] }] },
   ],
 };
 
@@ -77,26 +76,30 @@ export const LIMITS = `# 대출 한도
 - 간행물 상한 ([[loan_return_rule_v2]])
 `;
 
-export const PLAN = `# 대출 기획서
+export const PLAN = `# 기획서가 정한 것
+
+기획서가 대출 권수를 어떻게 다루는지 봅니다.
 
 ## 대출 권수
 <!-- context: plan -->
-v2는 한도 결정을 따로 둔다.
+v2는 한도 결정을 따로 둡니다. [[plan]]
 
 ### 여기까지 온 과정
 <!-- history: plan -->
-1. **v1** 대출 권수를 고정했다.
-2. **v2** 한도 결정을 따로 두었다.
+1. **v1** 대출 권수를 고정했습니다.
+2. **v2** 한도 결정을 따로 두었습니다.
+
+이제 한도를 봅니다. [[loan/limits]]
 `;
 
-export const VISION = `# 비전
+export const OPENING = `# 여는 글
 
-## 핵심
-<!-- layers: L0_vision -->
-누구나 책을 빌릴 수 있게 한다.
+책을 빌리러 온 사람을 따라갑니다. 누구나 책을 빌릴 수 있게 하는 것이 이 책의 바탕입니다. [[L0_vision|도서관의 비전]]
+
+앞의 두 장은 빌리는 사람과 함께 걷고, 마지막 장은 알림을 받는 자리에서 봅니다. [[loan/plan]]
 `;
 
-export const MANUSCRIPTS = { 'loan/limits': LIMITS, 'background/plan': PLAN, 'background/vision': VISION };
+export const MANUSCRIPTS = { opening: OPENING, 'loan/limits': LIMITS, 'loan/plan': PLAN };
 
 export const bookDirOf = (project) => path.join(project, 'docs', 'atomic-book');
 
@@ -113,7 +116,7 @@ export function makeBook({ book = BOOK, manuscripts = MANUSCRIPTS, mutate, revie
 export function markReviewed(dir) {
   const ctx = openBook(dir);
   const state = readState(dir);
-  for (const e of chapters(ctx.book)) {
+  for (const e of entries(ctx.book)) {
     const f = manuscriptFile(dir, e.key);
     if (!fs.existsSync(f)) continue;
     const bundle = bundleHash(renderBundle(e, ctx));
@@ -122,4 +125,4 @@ export function markReviewed(dir) {
   writeState(dir, state);
 }
 
-export const entryOf = (ctx, key) => [...chapters(ctx.book)].find((e) => e.key === key);
+export const entryOf = (ctx, key) => [...entries(ctx.book)].find((e) => e.key === key);

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { write, edit, runCli, ATOMS } from './util.mjs';
-import { makeBook, entryOf, MANUSCRIPTS, LIMITS, PLAN, BOOK } from './samplebook.mjs';
+import { makeBook, entryOf, MANUSCRIPTS, LIMITS, PLAN, OPENING, BOOK } from './samplebook.mjs';
 import { openBook } from '../lib/bookfile.mjs';
 import { checkChapter, checkBook, numberTokens } from '../lib/check.mjs';
 
@@ -18,7 +18,8 @@ const swap = (a, b) => { const t = LIMITS.replace(a, b); assert.notEqual(t, LIMI
 
 test('바른 원고는 오류가 없다', () => {
   assert.deepEqual(errors(run(LIMITS)), []);
-  assert.deepEqual(errors(run(PLAN, 'background/plan')), []);
+  assert.deepEqual(errors(run(PLAN, 'loan/plan')), []);
+  assert.deepEqual(errors(run(OPENING, 'opening')), []);
 });
 
 const cases = [
@@ -29,13 +30,13 @@ const cases = [
   ['number', '도입의 없는 숫자', swap('모았다.', '41건 모았다.')],
   ['number', '절 제목의 없는 숫자', swap('## 반납', '## 반납 77단계')],
   ['history-count', '빠진 이력', swap(/^2\. .*\n/m, '')],
-  ['history-count', '이력 표식이 없음', swap('<!-- history: loan_return_rule_v2 -->\n', '')],
   ['history-count', '이력이 없는 결정의 이력', swap('## 아직', '### 과정\n<!-- history: loan_fee_values_rnd_v1 -->\n1. 하나\n\n## 아직')],
   ['open-missing', '미정 사항이 빠짐', swap('[[loan_fee_values_rnd_v1]]', '')],
   ['coverage', '표식 없는 절', swap('## 아직', '## 덧붙임\n말.\n\n## 아직')],
   ['coverage', '다른 장의 결정', swap('<!-- atoms: loan_return_rule_v2 -->', '<!-- atoms: loan_return_rule_v2, notice_feedback_v1 -->')],
-  ['coverage', '두 절에 나온 결정', swap('<!-- atoms: loan_return_rule_v2 -->', '<!-- atoms: loan_return_rule_v2, loan_fee_values_rnd_v1 -->')],
   ['unknown-link', '없는 이름', swap('## 반납', '[[no_such_atom_v1]]\n\n## 반납')],
+  ['unknown-link', '없는 장', swap('## 반납', '[[loan/nowhere]]\n\n## 반납')],
+  ['history-count', '이력을 두 번 씀', swap('## 아직', '### 또\n<!-- history: loan_return_rule_v2 -->\n1. **v1** 하나\n2. **v2** 둘\n\n## 아직').replace('## 반납\n<!-- atoms: loan_return_rule_v2 -->', '## 반납\n<!-- atoms: loan_return_rule_v2 -->')],
   ['leftover', '남은 자리표시자', swap('모았다.', '모았다. {{ROOT}}')],
 ];
 for (const [code, why, text] of cases) test(`${code}: ${why}`, () => assert.deepEqual(codes(run(text)), [code]));
@@ -46,8 +47,45 @@ test('coverage: 절에서 빠진 결정', () => {
   assert.match(errors(r).find((f) => f.code === 'coverage').message, /loan_fee_values_rnd_v1/);
 });
 
-test('coverage: 배경 장의 컨텍스트 문서가 빠짐', () => {
-  assert.ok(codes(run(PLAN.replace('<!-- context: plan -->', '<!-- layers: L0_vision -->'), 'background/plan')).includes('coverage'));
+test('coverage: 장의 컨텍스트 문서가 빠짐', () => {
+  const r = errors(run(PLAN.replace('<!-- context: plan -->', '<!-- layers: L1_loan_system -->').replace('<!-- history: plan -->\n', ''), 'loan/plan'));
+  assert.deepEqual([...new Set(r.map((f) => f.code))], ['coverage']);
+  assert.ok(r.some((f) => /어느 절에도 없습니다: plan/.test(f.message)));
+  assert.ok(r.some((f) => /목차에 없습니다: L1_loan_system/.test(f.message)));
+});
+
+test('이력은 쓰지 않아도 되고, 같은 결정을 여러 절에 써도 된다', () => {
+  assert.deepEqual(errors(run(swap('<!-- history: loan_return_rule_v2 -->\n', ''))), []);
+  assert.deepEqual(errors(run(swap('<!-- atoms: loan_return_rule_v2 -->', '<!-- atoms: loan_return_rule_v2, loan_fee_values_rnd_v1 -->'))), []);
+});
+
+test('Layer 문서는 표식이 없어도 되지만 장의 목차에 있는 것만 쓴다', () => {
+  assert.deepEqual(errors(run(swap('<!-- atoms: concept_loan_item_v2 -->', '<!-- atoms: concept_loan_item_v2 -->\n<!-- layers: L1_loan_system -->'))), []);
+  assert.deepEqual(codes(run(swap('<!-- atoms: concept_loan_item_v2 -->', '<!-- atoms: concept_loan_item_v2 -->\n<!-- layers: L0_vision -->'))), ['coverage']);
+});
+
+test('원고 제목의 장 번호는 도구가 붙이므로 세지 않는다', () => {
+  assert.deepEqual(errors(run(swap('# 대출 한도', '# 7장. 대출 한도'))), []);
+});
+
+test('장 이름 링크는 부/장이나 하나뿐인 장 id로 쓴다', () => {
+  assert.deepEqual(errors(run(swap('모았다.', '모았다. [[notice/channels]] [[channels]]'))), []);
+});
+
+test('장면(lead)의 숫자와 식별자도 원문에 있어야 한다', () => {
+  const book = structuredClone(BOOK);
+  book.parts[0].chapters[1].lead = '`renewDays`가 9일이면 어떻게 될까요?';
+  const b = makeBook({ book });
+  const ctx = openBook(b.dir);
+  const r = errors(checkChapter(entryOf(ctx, KEY), ctx));
+  assert.deepEqual(r.map((f) => [f.code, f.section]), [['number', '장면(lead)']]);
+});
+
+test('여는 글은 발췌 전체를 원문으로 삼아 숫자·식별자·링크를 본다', () => {
+  assert.deepEqual(codes(run(OPENING.replace('따라갑니다.', '따라갑니다. 99권을 빌립니다.'), 'opening')), ['number']);
+  assert.deepEqual(codes(run(OPENING.replace('따라갑니다.', '따라갑니다. `nope`'), 'opening')), ['identifier']);
+  assert.deepEqual(codes(run(OPENING.replace('[[loan/plan]]', '[[loan/nope]]'), 'opening')), ['unknown-link']);
+  assert.deepEqual(errors(run(OPENING.replace('따라갑니다.', '따라갑니다. 3장까지 있습니다.'), 'opening')), []);
 });
 
 test('책 밖 이름은 경고만 한다', () => {
@@ -73,9 +111,10 @@ test('숫자는 단위·쉼표·커밋 해시를 구분해 센다', () => {
 });
 
 test('원고가 없으면 경고만 한다', () => {
-  const b = makeBook();
+  const b = makeBook({ manuscripts: { 'loan/limits': LIMITS } });
   const ctx = openBook(b.dir);
   assert.deepEqual(checkChapter(entryOf(ctx, 'notice/channels'), ctx).map((f) => [f.level, f.code]), [['warn', 'unwritten']]);
+  assert.deepEqual(checkChapter(entryOf(ctx, 'opening'), ctx).map((f) => [f.level, f.code]), [['warn', 'unwritten']]);
 });
 
 test('대조하지 않았거나 원문이 바뀌면 review-missing이다', () => {

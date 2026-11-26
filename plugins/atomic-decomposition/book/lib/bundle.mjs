@@ -4,7 +4,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { readText } from './fsutil.mjs';
 import { outsideCode } from './links.mjs';
-import { BACKGROUND } from './bookfile.mjs';
+import { chapters, titles } from './bookfile.mjs';
+import { levelOf } from './layers.mjs';
 
 const KEEP = ['Why', 'Rule', 'Exceptions', 'Invalidation'];
 const NO_EXCEPTION = /^[-*\s]*(없음|해당 없음|none)?[.\s]*$/i;
@@ -45,13 +46,13 @@ function previousOf(docs, ctx) {
   return out;
 }
 
-export function chapterSources({ part, chapter }, ctx) {
+export function chapterSources({ chapter }, ctx) {
   const current = known(chapter.atoms, ctx);
   return {
     current,
     previous: previousOf(current, ctx),
     layers: known(chapter.layers, ctx),
-    context: part.id === BACKGROUND ? ctx.context.filter((c) => (chapter.context ?? []).includes(c.id)) : [],
+    context: ctx.context.filter((c) => (chapter.context ?? []).includes(c.id)),
   };
 }
 
@@ -70,7 +71,7 @@ export const sectionSources = (section, ctx) => sourceText(section, ctx, (d) => 
 export const sectionNumbers = (section, ctx) => sourceText(section, ctx, (d) => [d.title, d.decided, d.created, d.body].join('\n'));
 
 /** 장 전체를 한 절로 본 것. 도입과 미정 절을 검사할 때 쓴다. */
-export const wholeChapter = ({ part, chapter }) => ({ atoms: chapter.atoms, layers: chapter.layers, context: part.id === BACKGROUND ? chapter.context : [] });
+export const wholeChapter = ({ chapter }) => ({ atoms: chapter.atoms, layers: chapter.layers, context: chapter.context });
 
 const RELATION = [['requires', '전제'], ['derives_from', '근거'], ['affects', '영향']];
 
@@ -93,10 +94,45 @@ function atomBlock(doc, ctx) {
   return out.join('\n');
 }
 
+/**
+ * 발췌의 첫 줄. 장의 자리와 장면(lead), 앞뒤 장을 알린다.
+ * 첫 줄은 해시에서 빠지므로 제목·순서·장면만 바꿔도 다시 쓰지 않는다.
+ */
+function headLine(entry, ctx) {
+  const t = titles(ctx.book);
+  const list = [...chapters(ctx.book)];
+  const i = list.findIndex((e) => e.key === entry.key);
+  const near = (e) => (e ? `${t.chapter.get(e.key)} [[${e.key}]]` : '없음');
+  return [
+    `장 원문 발췌: ${t.part.get(entry.part.id)} / ${t.chapter.get(entry.key)} (${entry.key})`,
+    entry.chapter.lead ? `장면: ${entry.chapter.lead}` : '',
+    `앞 장: ${near(list[i - 1])}`,
+    `다음 장: ${near(list[i + 1])}`,
+  ].filter(Boolean).join(' · ');
+}
+
+/** 여는 글의 발췌: 책의 차례와 장면, L0 문서, 현행 결정의 한 문장 요약. */
+function renderOpening(entry, ctx) {
+  const t = titles(ctx.book);
+  const out = [`여는 글 원문 발췌: ${ctx.book.title ?? ''} (${entry.key})`, '', '=== 책의 차례', ''];
+  for (const part of ctx.book.parts ?? []) {
+    out.push(`- ${t.part.get(part.id)}`);
+    for (const ch of part.chapters ?? []) {
+      const key = `${part.id}/${ch.id}`;
+      out.push(`  - ${t.chapter.get(key)} [[${key}]]${ch.lead ? ` — 장면: ${ch.lead}` : ''}`);
+    }
+  }
+  out.push('');
+  for (const l of ctx.store.layers.filter((d) => levelOf(d) === '0')) out.push(`=== Layer 문서: ${l.name}`, '', keptText(l), '');
+  out.push('=== 현행 결정의 한 문장 요약', '');
+  for (const d of ctx.store.atoms.filter((x) => x.live)) out.push(`- ${d.name} (${d.type} · ${d.status}) ${d.title}: ${d.summary}`);
+  return out.join('\n') + '\n';
+}
+
 export function renderBundle(entry, ctx) {
-  const { part, chapter, key } = entry;
+  if (entry.opening) return renderOpening(entry, ctx);
   const src = chapterSources(entry, ctx);
-  const out = [`장 원문 발췌: ${part.title} / ${chapter.title} (${key})`, ''];
+  const out = [headLine(entry, ctx), ''];
   for (const l of src.layers) out.push(`=== Layer 문서: ${l.name}`, '', keptText(l), '');
   for (const d of src.current) out.push(atomBlock(d, ctx));
   for (const c of src.context) {

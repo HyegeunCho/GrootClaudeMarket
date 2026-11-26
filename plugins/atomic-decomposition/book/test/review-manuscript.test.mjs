@@ -13,8 +13,8 @@ test('원고의 이름 링크나 대괄호 이름 뒤에 괄호 글이 와도 �
   const b = makeBook({ manuscripts: { ...MANUSCRIPTS, 'loan/limits': text } });
   buildMd(openBook(b.dir));
   const line = read(b.project, 'docs/atomic-book/md/chapters/loan/limits.md').split('\n').find((l) => l.includes('모았다.'));
-  assert.ok(line.includes('(#loan_return_rule_v2)(반납)과'), line);
+  assert.ok(line.includes('(../../appendix/atoms/loan_return_rule_v2.md)(반납)과'), line);
   assert.ok(line.includes('\\[이름표\\](가칭)과'), line);
-  assert.ok(line.includes('\\[항목\\]([알림 시험') && line.includes('#notice_feedback_v1))'), line);
+  assert.ok(line.includes('\\[항목\\]([알림 시험') && line.includes('notice_feedback_v1.md))'), line);
   assert.deepEqual(checkBuilt(openBook(b.dir)).filter((f) => f.level === 'error'), []);
 });

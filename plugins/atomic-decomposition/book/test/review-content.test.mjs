@@ -173,7 +173,7 @@ test('이력 항목의 순서와 날짜가 원문과 맞아야 한다', () => {
   const swapped = LIMITS.replace(one, '@@').replace(three, one.replace('1.', '3.')).replace('@@', three.replace('3.', '1.'));
   assert.deepEqual(codes(checkOf(KEY, swapped)), ['history-order']);
   assert.deepEqual(codes(checkOf(KEY, swap(LIMITS, '2. **v2 (2026-03-17)**', '2. **v2 (2026-03-13)**'))), ['history-order']);
-  assert.deepEqual(codes(checkOf('background/plan', swap(PLAN, '1. **v1**', '1. **v2**'))), ['history-order']);
+  assert.deepEqual(codes(checkOf('loan/plan', swap(PLAN, '1. **v1**', '1. **v2**'))), ['history-order']);
 });
 
 // I1

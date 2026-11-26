@@ -1,8 +1,8 @@
 # 빌드와 배포 안내
 
-이 커맨드는 책의 내용인 md까지만 만듭니다. GitBook 빌드, HTML 만들기, 올리기는 각자 원하는 도구로 합니다. 아래에서 `<md>`는 책 폴더의 `md/`입니다.
+이 커맨드는 책의 내용인 md까지 만듭니다. HTML은 요청하면 엮고(`html`), GitBook 연결과 올리기는 각자 합니다. 아래에서 `<md>`는 책 폴더의 `md/`입니다.
 
-`<md>`에는 `README.md`(표지), `SUMMARY.md`(목차), `.gitbook.yaml`, 본문과 부록이 모두 들어 있고 서로 상대 링크로만 이어져 있습니다. 폴더째 옮겨도 링크가 유지됩니다.
+`<md>`에는 `README.md`(여는 글과 읽는 순서), `SUMMARY.md`(차례), `.gitbook.yaml`, 본문과 부록이 모두 들어 있고 서로 상대 링크로만 이어져 있습니다. 폴더째 옮겨도 링크가 유지됩니다. 장 끝의 근거 문서 목록과 원문 쪽의 문서 정보는 `<details>`로 접혀 있습니다.
 
 ## 올리기 전에
 
@@ -24,19 +24,20 @@
 2. GitBook 스페이스에서 Git Sync를 켜고 저장소를 연결합니다.
 3. **Project directory**를 `<md>`의 저장소 안 경로로 지정합니다. `.gitbook.yaml`이 표지와 목차를 알려 줍니다.
 
-GitBook은 Mermaid 코드 블록을 그림으로 보여 줍니다. GitBook에서 내용을 고쳐 저장소로 되돌려 보내면 다음 build에서 덮어써지니, 고칠 것은 `manuscript/`에서 고칩니다.
+GitBook은 `<details>`를 펼침 블록으로, `SUMMARY.md`의 들여쓰기를 차례의 묶음으로 보여 줍니다(부록의 Layer 아래 결정, 결정 아래 지난 버전). GitBook에서 내용을 고쳐 저장소로 되돌려 보내면 다음 build에서 덮어써지니, 고칠 것은 `manuscript/`에서 고칩니다.
 
 참고: [GitBook Git Sync 설정](https://gitbook.com/docs/getting-started/git-sync/content-configuration)
 
-## 로컬 HTML로 보기
+## HTML로 엮기
 
-`README.md`와 `SUMMARY.md`를 쓰는 정적 사이트 도구면 됩니다. 예를 들어 [HonKit](https://github.com/honkit/honkit)은 다음과 같습니다.
+`/atomic-decomposition:book html`을 실행하면 Claude가 `<md>`를 읽어 `<책 폴더>/html/`에 웹에서 읽는 책을 엮습니다. 지침은 `guides/html.md`에 있습니다. 차례 사이드바, 접히는 Layer 묶음, 쪽 넘김, 밝게·어둡게, 좁은 화면을 갖춘 기본 스타일이 있고, 원하는 분위기나 참고 사이트를 말하면 그쪽을 따릅니다.
+
+다른 AI나 도구로 엮을 때도 그 AI에게 `guides/html.md`를 읽히면 같은 기준으로 엮습니다.
+
+`README.md`와 `SUMMARY.md`를 쓰는 정적 사이트 도구를 쓸 수도 있습니다. 예를 들어 [HonKit](https://github.com/honkit/honkit)은 다음과 같습니다.
 
 ```powershell
 npx honkit build <md> <출력 폴더>
 ```
 
-이 커맨드는 HonKit으로 빌드해 보지 않았습니다. 다음에 주의합니다.
-
-- 관계 그림(Mermaid)을 그리려면 플러그인이 따로 필요합니다.
-- 본문의 `{{ }}`와 `{% %}`를 템플릿 문법으로 읽습니다. `check`가 `liquid` 경고를 낸 쪽이 있으면 그 부분에서 빌드가 실패할 수 있습니다.
+이 커맨드는 HonKit으로 빌드해 보지 않았습니다. 본문의 `{{ }}`와 `{% %}`를 템플릿 문법으로 읽으므로, `check`가 `liquid` 경고를 낸 쪽이 있으면 그 부분에서 빌드가 실패할 수 있습니다.

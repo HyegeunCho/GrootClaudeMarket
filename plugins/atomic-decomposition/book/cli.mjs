@@ -7,7 +7,7 @@ import { readText, writeText, toPosix } from './lib/fsutil.mjs';
 import { loadStore, findStores } from './lib/store.mjs';
 import { buildLineage, buildRelations } from './lib/lineage.mjs';
 import { findCandidates, findUnsupported, inside } from './lib/context.mjs';
-import { readBook, readState, writeState, chapters, validateOutline, openBook } from './lib/bookfile.mjs';
+import { readBook, readState, writeState, entries, validateOutline, openBook } from './lib/bookfile.mjs';
 import { renderBundle, bundleHash, chapterStatus, diffLines, manuscriptFile, hash } from './lib/bundle.mjs';
 import { renderInventory } from './lib/inventory.mjs';
 import { checkBook, checkBuilt, formatFindings } from './lib/check.mjs';
@@ -16,9 +16,9 @@ import { buildMd } from './lib/build-md.mjs';
 const USAGE = `사용법: node cli.mjs <명령> [옵션]
   stores --project <폴더>                              Atom 저장소를 찾는다
   scan   --root <저장소> --project <폴더> --out <책>    목록·이력·컨텍스트 후보를 모은다
-  bundle --out <책> [--only <부·장>]                   장별 원문 발췌를 만들고 상태를 알린다
-  record --out <책> --chapter <부/장> --written         원고를 썼음을 기록한다
-  record --out <책> --chapter <부/장> --review <json>   대조 결과를 기록한다
+  bundle --out <책> [--only <부·장|opening>]           장별(여는 글 포함) 원문 발췌를 만들고 상태를 알린다
+  record --out <책> --chapter <부/장|opening> --written         원고를 썼음을 기록한다
+  record --out <책> --chapter <부/장|opening> --review <json>   대조 결과를 기록한다
   check  --out <책>                                    원고와 md를 검사한다
   build  --out <책>                                    md를 만든다`;
 
@@ -30,7 +30,7 @@ const workFile = (ctx, kind, key) => path.join(ctx.bookDir, '.work', kind, `${ke
 
 function warnOutline(ctx) {
   const r = validateOutline(ctx.book, ctx.store, ctx.context);
-  const label = { missing: '목차에 없는 결정', duplicate: '두 번 나오는 결정', unknown: '저장소에 없는 이름', archived: 'archived인데 현행 자리에 있는 결정' };
+  const label = { missing: '목차에 없는 결정 (본문에 싣지 않으려면 appendixOnly에 넣습니다)', duplicate: '한 장에 두 번, 또는 본문과 appendixOnly에 함께 있는 결정', unknown: '저장소에 없는 이름', archived: 'archived인데 현행 자리에 있는 결정' };
   for (const [k, text] of Object.entries(label)) if (r[k].length) console.error(`[목차] ${text}: ${r[k].join(', ')}`);
   for (const p of r.problems) console.error(`[목차] ${p}`);
   for (const p of ctx.contextProblems) console.error(`[컨텍스트] ${p.file}: ${p.message}`);
@@ -76,9 +76,9 @@ const commands = {
     need(opt, 'out');
     const ctx = openBook(abs(opt.out));
     warnOutline(ctx);
-    let list = [...chapters(ctx.book)];
+    let list = [...entries(ctx.book)];
     if (opt.only) {
-      list = list.filter((e) => [e.part.id, e.part.title, e.key, e.chapter.id, e.chapter.title].includes(opt.only));
+      list = list.filter((e) => [e.part.id, e.part.title, e.key, e.chapter.id, e.chapter.title].filter(Boolean).includes(opt.only));
       if (!list.length) fail(`"${opt.only}"에 맞는 부나 장이 없습니다. 부: ${ctx.book.parts.map((p) => `${p.id}(${p.title})`).join(', ')}`);
     }
     for (const e of list) {
@@ -98,7 +98,7 @@ const commands = {
     need(opt, 'out', 'chapter');
     if (!opt.written && !opt.review) fail('--written이나 --review가 필요합니다');
     const ctx = openBook(abs(opt.out));
-    const entry = [...chapters(ctx.book)].find((e) => e.key === opt.chapter) ?? fail(`장이 없습니다: ${opt.chapter}`);
+    const entry = [...entries(ctx.book)].find((e) => e.key === opt.chapter) ?? fail(`장이 없습니다: ${opt.chapter}`);
     const file = manuscriptFile(ctx.bookDir, entry.key);
     if (!fs.existsSync(file)) fail(`원고가 없습니다: ${toPosix(file)}`);
     const state = readState(ctx.bookDir);
